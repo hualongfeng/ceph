@@ -467,7 +467,7 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
   }
 
   
-  mydout(20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
+  lsubdout(g_ceph_context, rgw, 20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
   op.read(read_ofs, len, nullptr, nullptr);
 
   const uint64_t cost = len;
@@ -480,7 +480,7 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
     auto obj = d->store->svc.rados->obj(read_obj);
     r = obj.open();
     if (r < 0) {
-      mydout(4) << "failed to open rados context for " << read_obj << dendl;
+      lsubdout(g_ceph_context, rgw, 4) << "failed to open rados context for " << read_obj << dendl;
       return r;
     }
     std::string d3n_location = T::cct->_conf->rgw_datacache_persistent_path;
@@ -488,11 +488,11 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
     return d->flush(std::move(completed));
   
   } else {
-    mydout(20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
+    lsubdout(g_ceph_context, rgw, 20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
     auto obj = d->store->svc.rados->obj(read_obj);
     r = obj.open();
     if (r < 0) {
-      mydout(4) << "failed to open rados context for " << read_obj << dendl;
+      lsubdout(g_ceph_context, rgw, 4) << "failed to open rados context for " << read_obj << dendl;
       return r;
     }
     
