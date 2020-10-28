@@ -668,8 +668,11 @@ static size_t _l2_response_cb(void *ptr, size_t size, size_t nmemb, void* param)
   return size*nmemb;
 }
 
+
 void HttpL2Request::run()
 {
+  
+/*
   get_obj_data* d = static_cast<get_obj_data*>(req->op_data);
   int n_retries = cct->_conf->rgw_l2_request_thread_num;
   int r = 0;
@@ -683,8 +686,9 @@ void HttpL2Request::run()
       return;
     }
   }
+  */
 }
-
+/*
 int HttpL2Request::submit_http_request()
 {
   CURLcode res;
@@ -788,3 +792,4 @@ int HttpL2Request::sign_request(RGWAccessKey& key, RGWEnv& env, req_info& info)
 
   return 0;
 }
+*/

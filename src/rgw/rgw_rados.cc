@@ -20,6 +20,7 @@
 #include "common/errno.h"
 #include "common/Formatter.h"
 #include "common/Throttle.h"
+//#include "common/split.h"
 
 #include "rgw_sal.h"
 #include "rgw_zone.h"
@@ -1116,6 +1117,11 @@ int RGWRados::init_rados()
     return ret;
   }
   cr_registry = crs.release();
+
+  datacache = new DataCache();
+  if(use_datacache) {
+    datacache->init(cct);
+  }
   
   return ret;
 }
@@ -3298,7 +3304,15 @@ class RGWRadosPutObj : public RGWHTTPStreamRWRequest::ReceiveCB
   map<string, bufferlist> src_attrs;
   uint64_t ofs{0};
   uint64_t lofs{0}; /* logical ofs */
+  RGWGetDataCB* client_cb;
   std::function<int(map<string, bufferlist>&)> attrs_handler;
+
+  bufferlist chunk_buffer;
+  string chunk_name;
+  uint64_t chunk_id = 0;
+  uint64_t chunk_size = COPY_BUF_SIZE;
+  RGWRados *store;
+  get_obj_data *d;
 public:
   RGWRadosPutObj(CephContext* cct,
                  CompressorRef& plugin,
@@ -3315,6 +3329,7 @@ public:
                        progress_cb(_progress_cb),
                        progress_data(_progress_data),
                        attrs_handler(_attrs_handler) {}
+
 
   int process_attrs(void) {
     if (extra_data_bl.length()) {
@@ -3417,6 +3432,7 @@ public:
   }
 
   int handle_data(bufferlist& bl, bool *pause) override {
+
     if (progress_cb) {
       progress_cb(data_len, progress_data);
     }
@@ -3457,6 +3473,18 @@ public:
 
     const uint64_t lofs = data_len;
     data_len += size;
+
+    bufferlist bl_temp;
+    bl_temp.append(bl);
+    client_cb->handle_data(bl_temp, 0, size);
+    chunk_buffer.append(bl);
+
+    if (chunk_buffer.length() >= chunk_size) {
+      bufferlist tmp;
+      chunk_buffer.splice(0, chunk_size, &tmp);
+      
+      chunk_id += 1;
+    }
 
     return filter->process(std::move(bl), lofs);
   }
@@ -3613,6 +3641,7 @@ class RGWGetExtraDataCB : public RGWHTTPStreamRWRequest::ReceiveCB {
 public:
   RGWGetExtraDataCB() {}
   int handle_data(bufferlist& bl, bool *pause) override {
+    
     int bl_len = (int)bl.length();
     if (extra_data.length() < extra_data_len) {
       off_t max = extra_data_len - extra_data.length();
@@ -6318,10 +6347,9 @@ get_obj_data::get_obj_data(CephContext *_cct)
   lock(),
   data_lock(),
   cache_lock(),
-  l2_lock(),
-  throttle(cct, "get_obj_data", cct->_conf->rgw_get_obj_window_size, false)
-{
-}
+  l2_lock() {
+    set_d3n_cache_location();
+  }
 
 get_obj_data::~get_obj_data()
 {
@@ -6401,7 +6429,7 @@ void get_obj_data::add_io(off_t ofs, off_t len, bufferlist** pbl, AioCompletion*
   // we have a reference per IO, plus one reference for the calling function.
   // reference is dropped for each callback, plus when we're done iterating
   // over the parts
-  get();
+  //get();
 }
 
 void get_obj_data::cancel_io(off_t ofs)
@@ -6503,6 +6531,7 @@ string get_obj_data::deterministic_hash(string oid)
 {
   std::string location = cct->_conf->rgw_l2_hosts;
   string delimiters(",");
+
   std::vector<std::string> tokens = split(location, ",");
   int mod = tokens.size();
 
@@ -6531,18 +6560,28 @@ string get_obj_data::get_pending_oid()
   return str;
 }
 
+
+void get_obj_data::set_d3n_cache_location()
+{
+  d3n_cache_location = this->cct->_conf->rgw_datacache_persistent_path;
+  if(d3n_cache_location.back() != '/')
+  {
+    d3n_cache_location += "/";
+  }
+}
+
 int get_obj_data::add_l2_request(struct L2CacheRequest** cc, bufferlist* pbl, string oid,
                 off_t obj_ofs, off_t read_ofs, size_t len, string key, librados::AioCompletion* lc)
 {
-  L2CacheRequest* l2request = new L2CacheRequest(cct);
+  L2CacheRequest* l2request = new L2CacheRequest();
   l2request->sequence = sequence; sequence+=1;
   l2request->ofs = obj_ofs;
   l2request->len = len;
   l2request->oid  = oid;
   l2request->read_ofs = read_ofs;
   l2request->key = key;
-  l2request->lc = lc;
-  l2request->op_data = this;
+  //l2request->lc = lc;
+  //l2request->op_data = this;
   l2request->pbl = pbl;
   //FIXME calcuclate the destination for L2 and update l2request->dest
   l2request->dest=deterministic_hash(oid);
@@ -6557,19 +6596,19 @@ int get_obj_data::add_l2_request(struct L2CacheRequest** cc, bufferlist* pbl, st
 int get_obj_data::add_l1_request(struct L1CacheRequest** cc, bufferlist *pbl, string oid,
 		size_t len, off_t ofs, off_t read_ofs, string key, librados::AioCompletion *lc)
 {
-  L1CacheRequest* c = new L1CacheRequest(cct);
+  L1CacheRequest* c = new L1CacheRequest();
   c->sequence = sequence++;
   c->pbl = pbl;
   c->oid = oid;
   c->ofs = ofs;
   c->key = key;
-  c->lc = lc;
+  //c->lc = lc;
   c->len = len;
   c->read_ofs = read_ofs;
   c->stat = EINPROGRESS;
-  c->op_data = this;
+  //c->op_data = this;
 
-  std::string location = cct->_conf->rgw_datacache_persistent_path + oid;
+  std::string location = d3n_cache_location + oid;
   struct aiocb *cb = new struct aiocb;
   memset(cb, 0, sizeof(struct aiocb));
   cb->aio_fildes = ::open(location.c_str(), O_RDONLY);
@@ -6596,7 +6635,7 @@ int get_obj_data::add_l1_request(struct L1CacheRequest** cc, bufferlist *pbl, st
 
 int get_obj_data::submit_l1_io_read(bufferlist* pbl, int len, string oid)
 {
-  std::string location = cct->_conf->rgw_datacache_persistent_path + oid;
+  std::string location = d3n_cache_location + oid;
   int cache_file = -1;
   int r = 0;
 
@@ -6630,7 +6669,7 @@ int get_obj_data::submit_l1_aio_read(L1CacheRequest* cc)
 void _cache_aio_completion_cb(sigval_t sigval)
 {
   CacheRequest* c = static_cast<CacheRequest*>(sigval.sival_ptr);
-  c->op_data->cache_aio_completion_cb(c);
+  //c->op_data->cache_aio_completion_cb(c);
 }
 
 void get_obj_data::cache_aio_completion_cb(CacheRequest* c)
@@ -6691,7 +6730,7 @@ void RGWRados::get_obj_aio_completion_cb(completion_t c, void *arg)
   int r;
 
   ldout(cct, 20) << "get_obj_aio_completion_cb: io completion ofs=" << ofs << " len=" << len << dendl;
-  d->throttle.put(len);
+  //d->throttle.put(len);
 
   r = rados_aio_get_return_value(c);
   if (r < 0) {
@@ -6716,7 +6755,7 @@ void RGWRados::get_obj_aio_completion_cb(completion_t c, void *arg)
 done_unlock:
   d->data_lock.unlock();
 done:
-  d->put();
+  //d->put();
   return;
 }
 
@@ -6726,7 +6765,7 @@ int RGWRados::flush_read_list(struct get_obj_data* d)
   d->data_lock.lock();
   list<bufferlist> l;
   l.swap(d->read_list);
-  d->get();
+  //d->get();
   d->read_list.clear();
 
   d->data_lock.unlock();
@@ -6744,7 +6783,7 @@ int RGWRados::flush_read_list(struct get_obj_data* d)
   }
 
   d->data_lock.lock();
-  d->put();
+  //d->put();
   if (r < 0) {
     d->set_cancelled(r);
   }
@@ -6761,8 +6800,8 @@ int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
   ObjectReadOperation op;
   struct get_obj_data* d = static_cast<struct get_obj_data*>(arg);
   string oid, key;
-  buffer::list *pbl;
-  AioCompletion *c;
+  //buffer::list *pbl;
+  //AioCompletion *c;
   int r;
 
   if (is_head_obj) {
@@ -6792,39 +6831,22 @@ int RGWRados::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
     }
   }
 
-  d->throttle.get(len);
-  if(d->is_cancelled()) {
-    return d->get_err_code();
+  auto obj = d->store->svc.rados->obj(read_obj);
+  r = obj.open();
+  if (r < 0) {
+    ldout(cct, 4) << "failed to open rados context for " << read_obj << dendl;
+    return r;
   }
-
-  d->add_io(obj_ofs, len, &pbl, &c);
 
   ldout(cct, 20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
-  op.read(read_ofs, len, pbl, nullptr);
+  op.read(read_ofs, len, nullptr, nullptr);
 
-  if(read_obj.pool != d->io_ctx.get_pool_name()) {
-    ldout(cct, 20) << "rados->get_obj_iterate_cb changing io_ctx pool from " << d->io_ctx.get_pool_name() << " to " << read_obj.pool << dendl;
-    rados.ioctx_create(read_obj.pool.to_str().c_str(), d->io_ctx);
-  }
-  librados::IoCtx io_ctx(d->io_ctx);
-  io_ctx.locator_set_key(read_obj.loc);
+  const uint64_t cost = len;
+  const uint64_t id = obj_ofs; // use logical object offset for sorting replies
 
-  r = io_ctx.aio_operate(read_obj.oid, c, &op, NULL);
-  if (r < 0) {
-    ldout(cct, 0) << "rados->aio_operate r=" << r << dendl;
-    goto done_err;
-  }
+  auto completed = d->aio->get(obj, rgw::Aio::librados_op(std::move(op), d->yield), cost, id);
 
-  r = flush_read_list(d);
-  if (r < 0)
-      return r;
-  return 0;
-
-  done_err:
-    ldout(cct, 20) << "cancelling io r=" << r << " obj_ofs=" << obj_ofs << dendl;
-    d->set_cancelled(r);
-    d->cancel_io(obj_ofs);
-    return r;
+  return d->flush(std::move(completed));
 
 }
 
@@ -6838,45 +6860,23 @@ int RGWRados::Object::Read::iterate(int64_t ofs, int64_t end, RGWGetDataCB *cb,
   const uint64_t chunk_size = cct->_conf->rgw_get_obj_max_req_size;
   const uint64_t window_size = cct->_conf->rgw_get_obj_window_size;
   auto aio = rgw::make_throttle(window_size, y);
-  bool done = false;
-  struct get_obj_data* data = new get_obj_data(cct);
-  data->store = store;
-  data->client_cb = cb;
-  data->aio = &*aio;
-  data->io_ctx.dup(*state.cur_ioctx);
-  data->yield = y;
+  get_obj_data data(store, cb, &*aio, ofs, y);
+
+
   int r = store->iterate_obj(obj_ctx, source->get_bucket_info(), state.obj,
-                             ofs, end, chunk_size, _get_obj_iterate_cb, (void *)data, y);
+                             ofs, end, chunk_size, _get_obj_iterate_cb, &data, y);
 
   if (r < 0) {
     ldout(cct, 0) << "iterate_obj() failed with " << r << dendl;
-    data->cancel(); // drain completions without writing back to client
-    data->cancel_all_io();
-    goto done;
+    data.cancel(); // drain completions without writing back to client
+    return r;
   }
-
-
-  while(!done) {
-    r = data->wait_next_io(&done);
-    if (r < 0) {
-      dout(10) << __func__ << " r=" << r << ", cancelling all io" << dendl;
-      data->cancel_all_io();
-      break;
-    }
-    r = store->flush_read_list(data);
-    if (r < 0) {
-      dout(10) << __func__ << " r=" << r << ", cancelling all io" << dendl;
-      data->cancel_all_io();
-      break;
-    }
-  }
-
-
-done:
-  data->put();
-  return r;
-
-return data->drain();
+  
+  r = data.drain();
+  r = store->flush_read_list(&data);
+  if (r < 0)
+    return r;
+  return 0;
 }
 
 
@@ -9628,3 +9628,4 @@ int RGWRados::delete_obj_aio(const rgw_obj& obj,
   }
   return ret;
 }
+

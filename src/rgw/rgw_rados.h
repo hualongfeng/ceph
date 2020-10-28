@@ -8,6 +8,8 @@
 #include <fcntl.h>
 #include <boost/container/flat_map.hpp>
 #include <aio.h>
+#include <list>
+
 
 #include "include/rados/librados.hpp"
 #include "include/Context.h"
@@ -36,6 +38,9 @@
 #include "services/svc_bi_rados.h"
 #include "common/Throttle.h"
 #include "common/ceph_mutex.h"
+#include "rgw_cache.h"
+
+struct DataCache;
 
 class RGWWatcher;
 class SafeTimer;
@@ -438,6 +443,8 @@ class RGWRados
   bool quota_threads;
   bool run_sync_thread;
   bool run_reshard_thread;
+
+  get_obj_data* d;
 
   RGWMetaNotifier *meta_notifier;
   RGWDataNotifier *data_notifier;
@@ -1093,6 +1100,8 @@ public:
     ATTRSMOD_MERGE   = 2
   };
 
+  DataCache* datacache;
+
   int rewrite_obj(RGWBucketInfo& dest_bucket_info, rgw::sal::RGWObject* obj, const DoutPrefixProvider *dpp, optional_yield y);
 
   int stat_remote_obj(RGWObjectCtx& obj_ctx,
@@ -1572,7 +1581,7 @@ struct get_obj_io {
   bufferlist bl;
 };
 
-struct get_obj_data : public RefCountedObject{
+struct get_obj_data {
   CephContext* cct;
   RGWRados* store;
   RGWGetDataCB* client_cb;
@@ -1590,7 +1599,7 @@ struct get_obj_data : public RefCountedObject{
   std::mutex data_lock;
   std::mutex cache_lock;
   std::mutex l2_lock;
-  Throttle throttle;
+  std::string d3n_cache_location;
   std::atomic<bool> cancelled = { false };
   std::atomic<int64_t> err_code = { 0 };
   std::list<get_obj_aio_data> aio_data;
@@ -1606,9 +1615,8 @@ struct get_obj_data : public RefCountedObject{
   get_obj_data(CephContext *_cct);
 
   get_obj_data(RGWRados* store, RGWGetDataCB* cb, rgw::Aio* aio,
-               uint64_t offset, optional_yield yield, Throttle throttle)
-               : store(store), client_cb(cb), aio(aio), offset(offset), yield(yield),
-               throttle(cct, "get_obj_data", cct->_conf->rgw_get_obj_window_size, false) {}
+               uint64_t offset, optional_yield yield)
+               : store(store), client_cb(cb), aio(aio), offset(offset), yield(yield) {}
 
 
   ~get_obj_data();
@@ -1624,7 +1632,8 @@ struct get_obj_data : public RefCountedObject{
 
   int get_complete_ios(off_t ofs, list<bufferlist>& bl_list);
 
-  string get_pending_oid();
+  std::string get_pending_oid();
+  void set_d3n_cache_location();
   bool deterministic_hash_is_local(string oid);
   string deterministic_hash(string oid);
   int add_l1_request(struct L1CacheRequest** cc, bufferlist* pbl, string oid,
@@ -1637,12 +1646,12 @@ struct get_obj_data : public RefCountedObject{
   int submit_l1_aio_read(L1CacheRequest* cc);
   int submit_l1_io_read(bufferlist* pbl, int len, string oid);
 
-
   int flush(rgw::AioResultList&& results) {
     int r = rgw::check_for_errors(results);
     if (r < 0) {
       return r;
     }
+    std::list<bufferlist> bl_list;
 
     auto cmp = [](const auto& lhs, const auto& rhs) { return lhs.id < rhs.id; };
     results.sort(cmp); // merge() requires results to be sorted first
@@ -1651,13 +1660,15 @@ struct get_obj_data : public RefCountedObject{
     while (!completed.empty() && completed.front().id == offset) {
       auto bl = std::move(completed.front().data);
       completed.pop_front_and_dispose(std::default_delete<rgw::AioResultEntry>{});
-
+      bl_list.push_back(bl);
       offset += bl.length();
       int r = client_cb->handle_data(bl, 0, bl.length());
       if (r < 0) {
         return r;
       }
     }
+
+    read_list.splice(read_list.end(), bl_list);
     return 0;
   }
 

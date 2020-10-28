@@ -10,21 +10,29 @@
 #include "include/rados/librados.hpp"
 #include "include/Context.h"
 
+#include "rgw_aio.h"
+#include "rgw_cache.h"
+#define COPY_BUF_SIZE (4 * 1024 * 1024)
+
+class Aio;
+struct AioResult;
+struct DataCache;
+
 class CacheRequest {
   public:
     std::mutex lock;
     int sequence;
     buffer::list* pbl;
-    struct get_obj_data* op_data;
     std::string oid;
     off_t ofs;
     off_t len;
-    librados::AioCompletion* lc;
     std::string key;
     off_t read_ofs;
     Context *onack;
     CephContext* cct;
-    CacheRequest(CephContext* _cct) : sequence(0), pbl(nullptr), op_data(nullptr), ofs(0), lc(nullptr), read_ofs(0), cct(_cct) {};
+    rgw::AioResult* r = nullptr;
+    rgw::Aio* aio = nullptr;
+    CacheRequest() : sequence(0), pbl(nullptr), ofs(0), read_ofs(0), len(0){};
     virtual ~CacheRequest(){};
     virtual void release()=0;
     virtual void cancel_io()=0;
@@ -35,8 +43,37 @@ class CacheRequest {
 struct L1CacheRequest : public CacheRequest {
   int stat;
   struct aiocb* paiocb;
-  L1CacheRequest(CephContext* _cct) :  CacheRequest(_cct), stat(-1), paiocb(NULL) {}
+  L1CacheRequest() :  CacheRequest(), stat(-1), paiocb(nullptr) {}
   ~L1CacheRequest(){}
+
+  int prepare_op(std::string obj_key, bufferlist* bl, int read_len, int ofs, int read_ofs, std::string& cache_location,
+                 void(*f)(sigval_t), rgw::Aio* aio, rgw::AioResult* r) {
+    this->r = r;
+    this->aio = aio;
+    this->pbl = bl;
+    this->ofs = ofs;
+    this->key = obj_key;
+    this->len = read_len;
+    this->stat = EINPROGRESS;
+    std::string location = cache_location + obj_key;
+    struct aiocb* cb = new struct aiocb;
+    memset(cb, 0, sizeof(aiocb));
+    cb->aio_fildes = ::open(location.c_str(), O_RDONLY);
+    if (cb->aio_fildes < 0) {
+      return -1;
+    }
+
+    cb->aio_buf = malloc(read_len);
+    cb->aio_nbytes = read_len;
+    cb->aio_offset = read_ofs;
+    cb->aio_sigevent.sigev_notify = SIGEV_THREAD;
+    cb->aio_sigevent.sigev_notify_function = f;
+    cb->aio_sigevent.sigev_notify_attributes = NULL;
+    cb->aio_sigevent.sigev_value.sival_ptr = this;
+    this->paiocb = cb;
+    return 0;
+  }
+
   void release (){
     lock.lock();
     free((void*)paiocb->aio_buf);
@@ -69,7 +106,6 @@ struct L1CacheRequest : public CacheRequest {
 
   void finish(){
     pbl->append((char*)paiocb->aio_buf, paiocb->aio_nbytes);
-    onack->complete(0);
     release();
   }
 };
@@ -79,7 +115,7 @@ struct L2CacheRequest : public CacheRequest {
   int stat;
   void *tp;
   string dest;
-  L2CacheRequest(CephContext* _cct) : CacheRequest(_cct), read(0), stat(-1) {}
+  L2CacheRequest() : CacheRequest(), read(0), stat(-1) {}
   ~L2CacheRequest(){}
   void release (){
     lock.lock();

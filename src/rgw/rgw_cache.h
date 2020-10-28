@@ -93,6 +93,7 @@ private:
   std::mutex cache_lock;
   std::mutex req_lock;
   std::mutex eviction_lock;
+  std::string cache_location; 
 
   CephContext *cct;
   enum _io_type {
@@ -128,11 +129,13 @@ public:
   void init_l2_request_cb(librados::completion_t c, void *arg);
   void push_l2_request(L2CacheRequest* l2request);
   void l2_http_request(off_t ofs , off_t len, std::string oid);
+  
   void init(CephContext *_cct) {
     cct = _cct;
     free_data_cache_size = cct->_conf->rgw_datacache_size;
     head = nullptr;
     tail = nullptr;
+    cache_location = cct->_conf->rgw_datacache_persistent_path;
   }
 
   void lru_insert_head(struct ChunkDataInfo* o) {
@@ -365,7 +368,7 @@ template <class T>
 class RGWDataCache : public T
 {
 
-  DataCache   data_cache;
+  DataCache data_cache;
 
 public:
   RGWDataCache() {}
@@ -393,7 +396,6 @@ int RGWDataCache<T>::flush_read_list(struct get_obj_data* d) {
   d->data_lock.lock();
   std::list<bufferlist> l;
   l.swap(d->read_list);
-  d->get();
   d->read_list.clear();
   d->data_lock.unlock();
 
@@ -419,7 +421,6 @@ int RGWDataCache<T>::flush_read_list(struct get_obj_data* d) {
   }
 
   d->data_lock.lock();
-  d->put();
   if (r < 0) {
     d->set_cancelled(r);
   }
@@ -436,8 +437,6 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
   librados::ObjectReadOperation op;
   struct get_obj_data* d = static_cast<struct get_obj_data*>(arg);
   string oid, key;
-  bufferlist *pbl;
-  librados::AioCompletion *c;
 
   int r = 0;
 
@@ -459,6 +458,7 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
       d->lock.unlock();
 
       len -= chunk_len;
+      d->offset += chunk_len;
       read_ofs += chunk_len;
       obj_ofs += chunk_len;
       if (!len)
@@ -466,40 +466,42 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
     }
   }
 
-  d->throttle.get(len);
-  if (d->is_cancelled()) {
-    return d->get_err_code();
-  }
+  
+  mydout(20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
+  op.read(read_ofs, len, nullptr, nullptr);
 
-  // add io after we check that we're not cancelled, otherwise we're going to have trouble
-  // cleaning up
-  d->add_io(obj_ofs, len, &pbl, &c);
+  const uint64_t cost = len;
+  const uint64_t id = obj_ofs; // use logical object offset for sorting replies
+  oid = read_obj.oid;
 
-  lsubdout(g_ceph_context, rgw, 20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
-  op.read(read_ofs, len, pbl, NULL);
-
-  librados::IoCtx io_ctx(d->io_ctx);
-  io_ctx.locator_set_key(read_obj.loc);
-  d->add_pending_oid(read_obj.oid);
+  d->add_pending_oid(oid);
 
   if (data_cache.get(read_obj.oid)) {
-    L1CacheRequest* cc;
-    d->add_l1_request(&cc, pbl, read_obj.oid, len, obj_ofs, read_ofs, key, c);
-    r = io_ctx.cache_aio_notifier(read_obj.oid, static_cast<CacheRequest*>(cc));
-    r = d->submit_l1_aio_read(cc);
-    if (r != 0 ){
-      lsubdout(g_ceph_context, rgw, 0) << "Error cache_aio_read failed err=" << r << dendl;
-    }
-  } else if (d->deterministic_hash_is_local(read_obj.oid)){
-    lsubdout(g_ceph_context, rgw, 20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
-    op.read(read_ofs, len, pbl, NULL);
-    r = io_ctx.aio_operate(read_obj.oid, c, &op, NULL);
-    lsubdout(g_ceph_context, rgw, 20) << "rados->aio_operate r=" << r << " bl.length=" << pbl->length() << dendl;
+    auto obj = d->store->svc.rados->obj(read_obj);
+    r = obj.open();
     if (r < 0) {
-      lsubdout(g_ceph_context, rgw, 0) << "rados->aio_operate r=" << r << dendl;
-      goto done_err;
+      mydout(4) << "failed to open rados context for " << read_obj << dendl;
+      return r;
     }
-  }  else {
+    std::string d3n_location = T::cct->_conf->rgw_datacache_persistent_path;
+    auto completed = d->aio->get(obj, rgw::Aio::cache_op(std::move(op), d->yield, obj_ofs, read_ofs, len, d3n_location), cost, id);
+    return d->flush(std::move(completed));
+  
+  } else {
+    mydout(20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;
+    auto obj = d->store->svc.rados->obj(read_obj);
+    r = obj.open();
+    if (r < 0) {
+      mydout(4) << "failed to open rados context for " << read_obj << dendl;
+      return r;
+    }
+    
+    auto completed = d->aio->get(obj, rgw::Aio::librados_op(std::move(op), d->yield), cost, id);
+    return d->flush(std::move(completed));
+    
+  }
+
+  /*
     L2CacheRequest* cc;
     d->add_l2_request(&cc, pbl, read_obj.oid, obj_ofs, read_ofs, len, key, c);
     r = io_ctx.cache_aio_notifier(read_obj.oid, static_cast<CacheRequest*>(cc));
@@ -519,6 +521,7 @@ done_err:
   d->cancel_io(obj_ofs);
 
   return r;
+  */
 }
 
 class L2CacheThreadPool {
