@@ -18,7 +18,7 @@
 #include "librados/librados_asio.h"
 
 #include "rgw_aio.h"
-#include "rgw_cacherequest.h"
+#include "rgw_d3n_cacherequest.h"
 
 namespace rgw {
 
@@ -37,12 +37,12 @@ struct state {
 
 struct cache_state {
   Aio* aio;
-  L1CacheRequest* c;
+  D3nL1CacheRequest* c;
 
   cache_state(Aio* aio, AioResult& r)
     : aio(aio) {}
   
-  int submit_op(L1CacheRequest* cc) {
+  int submit_op(D3nL1CacheRequest* cc) {
     int ret = 0;
     if((ret = ::aio_read(cc->paiocb)) != 0) { 
       return ret;
@@ -62,7 +62,7 @@ void cb(librados::completion_t, void* arg) {
 }
 
 void cache_aio_cb(sigval_t sigval) {
-  L1CacheRequest* c = static_cast<L1CacheRequest*>(sigval.sival_ptr);
+  D3nL1CacheRequest* c = static_cast<D3nL1CacheRequest*>(sigval.sival_ptr);
   int status = c->status();
   if (status == ECANCELED) {
     c->r->result = -1;
@@ -132,7 +132,7 @@ Aio::OpFunc cache_aio_abstract(Op&& op, off_t obj_ofs, off_t read_ofs, off_t rea
   return [op = std::move(op), obj_ofs, read_ofs, read_len, location] (Aio* aio, AioResult& r) mutable{
     auto& ref = r.obj.get_ref();
     auto cs = new(&r.user_data) cache_state(aio, r);
-    cs->c = new L1CacheRequest();
+    cs->c = new D3nL1CacheRequest();
     cs->c->prepare_op(ref.obj.oid, &r.data, read_len, obj_ofs, read_ofs, location, cache_aio_cb, aio, &r);
     int ret = cs->submit_op(cs->c);
     if(ret < 0) {

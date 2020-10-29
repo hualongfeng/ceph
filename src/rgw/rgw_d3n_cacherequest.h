@@ -16,9 +16,9 @@
 
 class Aio;
 struct AioResult;
-struct DataCache;
+struct D3nDataCache;
 
-class CacheRequest {
+class D3nCacheRequest {
   public:
     std::mutex lock;
     int sequence;
@@ -32,19 +32,19 @@ class CacheRequest {
     CephContext* cct;
     rgw::AioResult* r = nullptr;
     rgw::Aio* aio = nullptr;
-    CacheRequest() : sequence(0), pbl(nullptr), ofs(0), len(0), read_ofs(0){};
-    virtual ~CacheRequest(){};
+    D3nCacheRequest() : sequence(0), pbl(nullptr), ofs(0), len(0), read_ofs(0){};
+    virtual ~D3nCacheRequest(){};
     virtual void release()=0;
     virtual void cancel_io()=0;
     virtual int status()=0;
     virtual void finish()=0;
 };
 
-struct L1CacheRequest : public CacheRequest {
+struct D3nL1CacheRequest : public D3nCacheRequest {
   int stat;
   struct aiocb* paiocb;
-  L1CacheRequest() :  CacheRequest(), stat(-1), paiocb(nullptr) {}
-  ~L1CacheRequest(){}
+  D3nL1CacheRequest() :  D3nCacheRequest(), stat(-1), paiocb(nullptr) {}
+  ~D3nL1CacheRequest(){}
 
   int prepare_op(std::string obj_key, bufferlist* bl, int read_len, int ofs, int read_ofs, std::string& cache_location,
                  void(*f)(sigval_t), rgw::Aio* aio, rgw::AioResult* r) {
@@ -110,13 +110,13 @@ struct L1CacheRequest : public CacheRequest {
   }
 };
 
-struct L2CacheRequest : public CacheRequest {
+struct D3nL2CacheRequest : public D3nCacheRequest {
   size_t read;
   int stat;
   void *tp;
   string dest;
-  L2CacheRequest() : CacheRequest(), read(0), stat(-1) {}
-  ~L2CacheRequest(){}
+  D3nL2CacheRequest() : D3nCacheRequest(), read(0), stat(-1) {}
+  ~D3nL2CacheRequest(){}
   void release (){
     lock.lock();
     lock.unlock();

@@ -14,7 +14,6 @@
 #include "librados_fwd.hpp"
 #include "rados_types.hpp"
 
-class CacheRequest;
 namespace libradosstriper
 {
   class RadosStriper;

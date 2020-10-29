@@ -14,43 +14,43 @@
 #include "include/Context.h"
 #include "include/lru.h"
 #include "rgw_threadpool.h"
-#include "rgw_cacherequest.h"
+#include "rgw_d3n_cacherequest.h"
 
 
-/*DataCache*/
-struct DataCache;
-class L2CacheThreadPool;
-class HttpL2Request;
+/*D3nDataCache*/
+struct D3nDataCache;
+class D3nL2CacheThreadPool;
+class D3nHttpL2Request;
 
-struct ChunkDataInfo : public LRUObject {
+struct D3nChunkDataInfo : public LRUObject {
 	CephContext *cct;
 	uint64_t size;
 	time_t access_time;
 	string address;
 	string oid;
 	bool complete;
-	struct ChunkDataInfo* lru_prev;
-	struct ChunkDataInfo* lru_next;
+	struct D3nChunkDataInfo* lru_prev;
+	struct D3nChunkDataInfo* lru_next;
 
-	ChunkDataInfo(): size(0) {}
+	D3nChunkDataInfo(): size(0) {}
 
 	void set_ctx(CephContext *_cct) {
 		cct = _cct;
 	}
 
 	void dump(Formatter *f) const;
-	static void generate_test_instances(list<ChunkDataInfo*>& o);
+	static void generate_test_instances(list<D3nChunkDataInfo*>& o);
 };
 
-struct CacheAioWriteRequest{
+struct D3nCacheAioWriteRequest{
 	string oid;
 	void *data;
 	int fd;
 	struct aiocb *cb;
-	DataCache *priv_data;
+	D3nDataCache *priv_data;
 	CephContext *cct;
 
-	CacheAioWriteRequest(CephContext *_cct) : cct(_cct) {}
+	D3nCacheAioWriteRequest(CephContext *_cct) : cct(_cct) {}
 	int create_io(bufferlist& bl, unsigned int len, string oid);
 
 	void release() {
@@ -63,17 +63,17 @@ struct CacheAioWriteRequest{
 	}
 };
 
-struct DataCache {
+struct D3nDataCache {
 
 private:
-  std::map<string, ChunkDataInfo*> cache_map;
+  std::map<string, D3nChunkDataInfo*> cache_map;
   std::list<string> outstanding_write_list;
   int index;
   std::mutex lock;
   std::mutex cache_lock;
   std::mutex req_lock;
   std::mutex eviction_lock;
-  std::string cache_location; 
+  std::string cache_location;
 
   CephContext *cct;
   enum _io_type {
@@ -85,29 +85,29 @@ private:
   struct sigaction action;
   uint64_t free_data_cache_size = 0;
   uint64_t outstanding_write_size = 0;
-  L2CacheThreadPool *tp;
-  struct ChunkDataInfo* head;
-  struct ChunkDataInfo* tail;
+  D3nL2CacheThreadPool *tp;
+  struct D3nChunkDataInfo* head;
+  struct D3nChunkDataInfo* tail;
 
 private:
   void add_io();
 
 public:
-  DataCache();
-  ~DataCache() {}
+  D3nDataCache();
+  ~D3nDataCache() {}
 
   bool get(const string& oid);
   void put(bufferlist& bl, unsigned int len, string& obj_key);
   int io_write(bufferlist& bl, unsigned int len, std::string oid);
   int create_aio_write_request(bufferlist& bl, unsigned int len, std::string oid);
-  void cache_aio_write_completion_cb(CacheAioWriteRequest* c);
+  void cache_aio_write_completion_cb(D3nCacheAioWriteRequest* c);
   size_t random_eviction();
   size_t lru_eviction();
   std::string hash_uri(std::string dest);
   std::string deterministic_hash(std::string oid);
-  void remote_io(struct L2CacheRequest* l2request);
+  void remote_io(struct D3nL2CacheRequest* l2request);
   void init_l2_request_cb(librados::completion_t c, void *arg);
-  void push_l2_request(L2CacheRequest* l2request);
+  void push_l2_request(D3nL2CacheRequest* l2request);
   void l2_http_request(off_t ofs , off_t len, std::string oid);
 
   void init(CephContext *_cct) {
@@ -118,7 +118,7 @@ public:
     cache_location = cct->_conf->rgw_d3n_l1_datacache_persistent_path;
   }
 
-  void lru_insert_head(struct ChunkDataInfo* o) {
+  void lru_insert_head(struct D3nChunkDataInfo* o) {
     o->lru_next = head;
     o->lru_prev = nullptr;
     if (head) {
@@ -128,7 +128,7 @@ public:
     }
     head = o;
   }
-  void lru_insert_tail(struct ChunkDataInfo* o) {
+  void lru_insert_tail(struct D3nChunkDataInfo* o) {
     o->lru_next = nullptr;
     o->lru_prev = tail;
     if (tail) {
@@ -139,7 +139,7 @@ public:
     tail = o;
   }
 
-  void lru_remove(struct ChunkDataInfo* o) {
+  void lru_remove(struct D3nChunkDataInfo* o) {
     if (o->lru_next)
       o->lru_next->lru_prev = o->lru_prev;
     else
@@ -154,13 +154,13 @@ public:
 
 
 template <class T>
-class RGWDataCache : public T
+class D3nRGWDataCache : public T
 {
 
-  DataCache data_cache;
+  D3nDataCache data_cache;
 
 public:
-  RGWDataCache() {}
+  D3nRGWDataCache() {}
 
   int init_rados() override {
     int ret;
@@ -180,7 +180,7 @@ public:
 
 
 template<typename T>
-int RGWDataCache<T>::flush_read_list(struct get_obj_data* d) {
+int D3nRGWDataCache<T>::flush_read_list(struct get_obj_data* d) {
 
   d->data_lock.lock();
   std::list<bufferlist> l;
@@ -219,7 +219,7 @@ int RGWDataCache<T>::flush_read_list(struct get_obj_data* d) {
 }
 
 template<typename T>
-int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
+int D3nRGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_ofs,
                                  off_t read_ofs, off_t len, bool is_head_obj,
                                  RGWObjState *astate, void *arg) {
 
@@ -288,9 +288,9 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
 
   /*
     // TODO: complete L2 cache support refactoring
-    L2CacheRequest* cc;
+    D3nL2CacheRequest* cc;
     d->add_l2_request(&cc, pbl, read_obj.oid, obj_ofs, read_ofs, len, key, c);
-    r = io_ctx.cache_aio_notifier(read_obj.oid, static_cast<CacheRequest*>(cc));
+    r = io_ctx.cache_aio_notifier(read_obj.oid, static_cast<D3nCacheRequest*>(cc));
     data_cache.push_l2_request(cc);
   }
 
@@ -310,16 +310,16 @@ done_err:
   */
 }
 
-class L2CacheThreadPool {
+class D3nL2CacheThreadPool {
 public:
-  L2CacheThreadPool(int n) {
+  D3nL2CacheThreadPool(int n) {
     for (int i=0; i<n; ++i) {
       threads.push_back(new PoolWorkerThread(workQueue));
       threads.back()->start();
     }
   }
 
-  ~L2CacheThreadPool() {
+  ~D3nL2CacheThreadPool() {
     finish();
   }
 
@@ -342,13 +342,13 @@ private:
   WorkQueue workQueue;
 };
 
-class HttpL2Request : public Task {
+class D3nHttpL2Request : public Task {
 public:
-  HttpL2Request(L2CacheRequest* _req, CephContext* _cct) : Task(), req(_req), cct(_cct) {
+  D3nHttpL2Request(D3nL2CacheRequest* _req, CephContext* _cct) : Task(), req(_req), cct(_cct) {
     pthread_mutex_init(&qmtx, 0);
     pthread_cond_init(&wcond, 0);
   }
-  ~HttpL2Request() {
+  ~D3nHttpL2Request() {
     pthread_mutex_destroy(&qmtx);
     pthread_cond_destroy(&wcond);
   }
@@ -362,7 +362,7 @@ private:
 private:
   pthread_mutex_t qmtx;
   pthread_cond_t wcond;
-  L2CacheRequest* req;
+  D3nL2CacheRequest* req;
   CURL *curl_handle;
   CephContext *cct;
 };

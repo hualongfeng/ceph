@@ -1120,7 +1120,7 @@ int RGWRados::init_rados()
   }
   cr_registry = crs.release();
 
-  datacache = new DataCache();
+  datacache = new D3nDataCache();
   if(use_datacache) {
     datacache->init(cct);
   }
@@ -6572,10 +6572,10 @@ void get_obj_data::set_d3n_cache_location()
   }
 }
 
-int get_obj_data::add_l2_request(struct L2CacheRequest** cc, bufferlist* pbl, string oid,
+int get_obj_data::add_l2_request(struct D3nL2CacheRequest** cc, bufferlist* pbl, string oid,
                 off_t obj_ofs, off_t read_ofs, size_t len, string key, librados::AioCompletion* lc)
 {
-  L2CacheRequest* l2request = new L2CacheRequest();
+  D3nL2CacheRequest* l2request = new D3nL2CacheRequest();
   l2request->sequence = sequence; sequence+=1;
   l2request->ofs = obj_ofs;
   l2request->len = len;
@@ -6595,10 +6595,10 @@ int get_obj_data::add_l2_request(struct L2CacheRequest** cc, bufferlist* pbl, st
   return 0;
 }
 
-int get_obj_data::add_l1_request(struct L1CacheRequest** cc, bufferlist *pbl, string oid,
+int get_obj_data::add_l1_request(struct D3nL1CacheRequest** cc, bufferlist *pbl, string oid,
 		size_t len, off_t ofs, off_t read_ofs, string key, librados::AioCompletion *lc)
 {
-  L1CacheRequest* c = new L1CacheRequest();
+  D3nL1CacheRequest* c = new D3nL1CacheRequest();
   c->sequence = sequence++;
   c->pbl = pbl;
   c->oid = oid;
@@ -6659,7 +6659,7 @@ END:
   return r;
 }
 
-int get_obj_data::submit_l1_aio_read(L1CacheRequest* cc)
+int get_obj_data::submit_l1_aio_read(D3nL1CacheRequest* cc)
 {
   int r = 0;
   if((r= ::aio_read(cc->paiocb)) != 0) {
@@ -6670,21 +6670,21 @@ int get_obj_data::submit_l1_aio_read(L1CacheRequest* cc)
 
 void _cache_aio_completion_cb(sigval_t sigval)
 {
-  //CacheRequest* c = static_cast<CacheRequest*>(sigval.sival_ptr);
+  //D3nCacheRequest* c = static_cast<D3nCacheRequest*>(sigval.sival_ptr);
   //c->op_data->cache_aio_completion_cb(c);
 }
 
-void get_obj_data::cache_aio_completion_cb(CacheRequest* c)
+void get_obj_data::cache_aio_completion_cb(D3nCacheRequest* c)
 {
   int status = c->status();
   if (status == ECANCELED) {
     cache_unmap_io(c->ofs);
-    ldout(cct, 0) << "DataCache: cache_aio_request: status = ECANCLE" << dendl;
+    ldout(cct, 0) << "D3nDataCache: cache_aio_request: status = ECANCLE" << dendl;
     return;
   } else if (status == 0) {
     cache_unmap_io(c->ofs);
     l2_lock.lock();
-    ldout(cct, 0) << "DataCache: cache_aio_completion_cb,inside the finish lock- oid : " << c->oid << ", len:" << std::hex << c->len << "plb->len" << std::hex << c->pbl->length()  << dendl;
+    ldout(cct, 0) << "D3nDataCache: cache_aio_completion_cb,inside the finish lock- oid : " << c->oid << ", len:" << std::hex << c->len << "plb->len" << std::hex << c->pbl->length()  << dendl;
     c->finish();
     l2_lock.unlock();
   }
@@ -6694,7 +6694,7 @@ void get_obj_data::cache_unmap_io(off_t ofs)
 {
 
   cache_lock.lock();
-  map<off_t, struct CacheRequest*>::iterator iter = cache_aio_map.find(ofs);
+  map<off_t, struct D3nCacheRequest*>::iterator iter = cache_aio_map.find(ofs);
   if (iter == cache_aio_map.end()) {
     cache_lock.unlock();
     return;
