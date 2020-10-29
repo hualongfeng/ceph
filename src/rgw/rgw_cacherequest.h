@@ -32,7 +32,7 @@ class CacheRequest {
     CephContext* cct;
     rgw::AioResult* r = nullptr;
     rgw::Aio* aio = nullptr;
-    CacheRequest() : sequence(0), pbl(nullptr), ofs(0), read_ofs(0), len(0){};
+    CacheRequest() : sequence(0), pbl(nullptr), ofs(0), len(0), read_ofs(0){};
     virtual ~CacheRequest(){};
     virtual void release()=0;
     virtual void cancel_io()=0;
