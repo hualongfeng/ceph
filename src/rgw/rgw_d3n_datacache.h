@@ -51,7 +51,7 @@ struct D3nCacheAioWriteRequest{
 	CephContext *cct;
 
 	D3nCacheAioWriteRequest(CephContext *_cct) : cct(_cct) {}
-	int create_io(bufferlist& bl, unsigned int len, string oid);
+	int create_io(bufferlist& bl, unsigned int len, string oid, string cache_location);
 
 	void release() {
 		::close(fd);
@@ -116,6 +116,10 @@ public:
     head = nullptr;
     tail = nullptr;
     cache_location = cct->_conf->rgw_d3n_l1_datacache_persistent_path;
+    if(cache_location.back() != '/')
+    {
+       cache_location += "/";
+    }
   }
 
   void lru_insert_head(struct D3nChunkDataInfo* o) {
@@ -271,8 +275,12 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t ob
       lsubdout(g_ceph_context, rgw, 4) << "failed to open rados context for " << read_obj << dendl;
       return r;
     }
-    std::string d3n_location = T::cct->_conf->rgw_d3n_l1_datacache_persistent_path;
-    auto completed = d->aio->get(obj, rgw::Aio::cache_op(std::move(op), d->yield, obj_ofs, read_ofs, len, d3n_location), cost, id);
+    std::string d3n_cache_location = T::cct->_conf->rgw_d3n_l1_datacache_persistent_path;
+    if(d3n_cache_location.back() != '/')
+    {
+       d3n_cache_location += "/";
+    }
+    auto completed = d->aio->get(obj, rgw::Aio::cache_op(std::move(op), d->yield, obj_ofs, read_ofs, len, d3n_cache_location), cost, id);
     return d->flush(std::move(completed));
   } else {
     lsubdout(g_ceph_context, rgw, 20) << "rados->get_obj_iterate_cb oid=" << read_obj.oid << " obj-ofs=" << obj_ofs << " read_ofs=" << read_ofs << " len=" << len << dendl;

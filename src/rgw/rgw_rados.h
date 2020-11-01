@@ -1290,8 +1290,6 @@ public:
                                  off_t read_ofs, off_t len, bool is_head_obj,
                                  RGWObjState *astate, void *arg);
 
-  void get_obj_aio_completion_cb(librados::completion_t cb, void *arg);
-
   /**
    * a simple object read without keeping state
    */
@@ -1585,12 +1583,9 @@ struct get_obj_data {
   CephContext* cct;
   RGWRados* store;
   RGWGetDataCB* client_cb;
-  RGWObjectCtx* ctx;
-  librados::IoCtx io_ctx;
   rgw::Aio* aio;
   uint64_t offset; // next offset to write to client
   uint64_t total_read;
-  int sequence;
 
   rgw::AioResultList completed; // completed read results, sorted by offset
   optional_yield yield;
@@ -1599,20 +1594,12 @@ struct get_obj_data {
   std::mutex data_lock;
   std::mutex cache_lock;
   std::mutex l2_lock;
-  std::string d3n_cache_location;
   std::atomic<bool> cancelled = { false };
   std::atomic<int64_t> err_code = { 0 };
-  std::list<get_obj_aio_data> aio_data;
   std::list<bufferlist> read_list;
   std::list<string> pending_oid_list;
-  std::map<off_t, get_obj_io> io_map;
-  std::map<off_t, D3nCacheRequest*> cache_aio_map;
-  std::map<off_t, librados::AioCompletion *> completion_map;
 
   char *tmp_data;
-
-
-  get_obj_data(CephContext *_cct);
 
   get_obj_data(RGWRados* store, RGWGetDataCB* cb, rgw::Aio* aio,
                uint64_t offset, optional_yield yield)
@@ -1623,28 +1610,10 @@ struct get_obj_data {
 
   void add_pending_oid(std::string oid);
   void set_cancelled(int r);
-  bool is_cancelled();
-  int get_err_code();
-  int wait_next_io(bool *done);
-  void add_io(off_t ofs, off_t len, bufferlist** pbl, librados::AioCompletion** pc);
-  void cancel_io(off_t ofs);
-  void cancel_all_io();
-
-  int get_complete_ios(off_t ofs, list<bufferlist>& bl_list);
-
   std::string get_pending_oid();
-  void set_d3n_cache_location();
+  std::string deterministic_hash(std::string oid);
   bool deterministic_hash_is_local(string oid);
-  string deterministic_hash(string oid);
-  int add_l1_request(struct D3nL1CacheRequest** cc, bufferlist* pbl, string oid,
-      size_t len, off_t ofs, off_t read_ofs, string key, librados::AioCompletion *lc);
-  int add_l2_request(struct D3nL2CacheRequest** cc, bufferlist* pbl, string oid,
-      off_t obj_ofs, off_t read_ofs, size_t len, string key, librados::AioCompletion *lc);
-  void cache_aio_completion_cb(D3nCacheRequest* c);
-  void cache_unmap_io(off_t ofs);
-
-  int submit_l1_aio_read(D3nL1CacheRequest* cc);
-  int submit_l1_io_read(bufferlist* pbl, int len, string oid);
+  
 
   int flush(rgw::AioResultList&& results) {
     int r = rgw::check_for_errors(results);

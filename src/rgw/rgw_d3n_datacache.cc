@@ -17,9 +17,9 @@
 class RGWGetObj_CB;
 
 
-int D3nCacheAioWriteRequest::create_io(bufferlist& bl, unsigned int len, string oid)
+int D3nCacheAioWriteRequest::create_io(bufferlist& bl, unsigned int len, string oid, string cache_location)
 {
-  std::string location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + oid;
+  std::string location = cache_location + oid;
   int r = 0;
 
   cb = new struct aiocb;
@@ -61,7 +61,7 @@ int D3nDataCache::io_write(bufferlist& bl, unsigned int len, std::string oid)
 {
   D3nChunkDataInfo* chunk_info = new D3nChunkDataInfo;
 
-  std::string location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + oid; /* replace tmp with the correct path from config file*/
+  std::string location = cache_location + oid; /* replace tmp with the correct path from config file*/
   FILE *cache_file = 0;
   int r = 0;
 
@@ -125,7 +125,7 @@ int D3nDataCache::create_aio_write_request(bufferlist& bl, unsigned int len, std
 {
   struct D3nCacheAioWriteRequest* wr = new struct D3nCacheAioWriteRequest(cct);
   int r=0;
-  if (wr->create_io(bl, len, oid) < 0) {
+  if (wr->create_io(bl, len, oid, cache_location) < 0) {
     ldout(cct, 0) << "D3nDataCache: Error create_aio_write_request" << dendl;
     goto done;
   }
@@ -188,7 +188,7 @@ void D3nDataCache::put(bufferlist& bl, unsigned int len, std::string& oid)
     cache_lock.lock();
     outstanding_write_list.remove(oid);
     cache_lock.unlock();
-    ldout(cct, 1) << "D3nDataCache: create_aio_wirte_request fail, r=" << r << dendl;
+    ldout(cct, 1) << "D3nDataCache: create_aio_write_request fail, r=" << r << dendl;
     return;
   }
 
@@ -201,7 +201,7 @@ void D3nDataCache::put(bufferlist& bl, unsigned int len, std::string& oid)
 bool D3nDataCache::get(const string& oid)
 {
   bool exist = false;
-  string location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + oid;
+  string location = cache_location + oid;
   cache_lock.lock();
   map<string, D3nChunkDataInfo*>::iterator iter = cache_map.find(oid);
   if (!(iter == cache_map.end())) {
@@ -254,7 +254,7 @@ size_t D3nDataCache::random_eviction()
   cache_map.erase(del_oid); // oid
   cache_lock.unlock();
 
-  location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + del_oid; /*replace tmp with the correct path from config file*/
+  location = cache_location + del_oid; /*replace tmp with the correct path from config file*/
   remove(location.c_str());
   return freed_size;
 }
@@ -286,7 +286,7 @@ size_t D3nDataCache::lru_eviction()
   cache_lock.unlock();
   freed_size = del_entry->size;
   free(del_entry);
-  location = cct->_conf->rgw_d3n_l1_datacache_persistent_path + del_oid; /*replace tmp with the correct path from config file*/
+  location = cache_location + del_oid; /*replace tmp with the correct path from config file*/
   remove(location.c_str());
   return freed_size;
 }
