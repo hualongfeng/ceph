@@ -1579,41 +1579,26 @@ struct get_obj_io {
   bufferlist bl;
 };
 
+
 struct get_obj_data {
-  CephContext* cct;
   RGWRados* store;
   RGWGetDataCB* client_cb;
   rgw::Aio* aio;
   uint64_t offset; // next offset to write to client
-  uint64_t total_read;
-
   rgw::AioResultList completed; // completed read results, sorted by offset
   optional_yield yield;
 
-  std::mutex lock;
-  std::mutex data_lock;
-  std::mutex cache_lock;
-  std::mutex l2_lock;
-  std::atomic<bool> cancelled = { false };
-  std::atomic<int64_t> err_code = { 0 };
-  std::list<bufferlist> read_list;
-  std::list<string> pending_oid_list;
-
-  char *tmp_data;
-
   get_obj_data(RGWRados* store, RGWGetDataCB* cb, rgw::Aio* aio,
                uint64_t offset, optional_yield yield)
-               : store(store), client_cb(cb), aio(aio), offset(offset), yield(yield) {}
+    : store(store), client_cb(cb), aio(aio), offset(offset), yield(yield) {}
 
-
-  ~get_obj_data();
-
-  void add_pending_oid(std::string oid);
-  void set_cancelled(int r);
-  std::string get_pending_oid();
-  std::string deterministic_hash(std::string oid);
-  bool deterministic_hash_is_local(string oid);
-  
+  std::mutex d3n_datacache_lock;
+  std::list<bufferlist> d3n_read_list;
+  std::list<string> d3n_pending_oid_list;
+  void d3n_add_pending_oid(std::string oid);
+  std::string d3n_get_pending_oid();
+  std::string d3n_deterministic_hash(std::string oid);
+  bool d3n_deterministic_hash_is_local(string oid);
 
   int flush(rgw::AioResultList&& results) {
     int r = rgw::check_for_errors(results);
@@ -1629,6 +1614,7 @@ struct get_obj_data {
     while (!completed.empty() && completed.front().id == offset) {
       auto bl = std::move(completed.front().data);
       completed.pop_front_and_dispose(std::default_delete<rgw::AioResultEntry>{});
+
       bl_list.push_back(bl);
       offset += bl.length();
       int r = client_cb->handle_data(bl, 0, bl.length());
@@ -1637,7 +1623,7 @@ struct get_obj_data {
       }
     }
 
-    read_list.splice(read_list.end(), bl_list);
+    d3n_read_list.splice(d3n_read_list.end(), bl_list);
     return 0;
   }
 
@@ -1659,7 +1645,6 @@ struct get_obj_data {
     return flush(std::move(c));
   }
 };
-
 
 
 #endif

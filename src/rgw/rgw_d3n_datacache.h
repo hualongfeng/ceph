@@ -186,11 +186,11 @@ public:
 template<typename T>
 int D3nRGWDataCache<T>::flush_read_list(struct get_obj_data* d) {
 
-  d->data_lock.lock();
+  d->d3n_datacache_lock.lock();
   std::list<bufferlist> l;
-  l.swap(d->read_list);
-  d->read_list.clear();
-  d->data_lock.unlock();
+  l.swap(d->d3n_read_list);
+  d->d3n_read_list.clear();
+  d->d3n_datacache_lock.unlock();
 
   int r = 0;
 
@@ -198,9 +198,9 @@ int D3nRGWDataCache<T>::flush_read_list(struct get_obj_data* d) {
   std::list<bufferlist>::iterator iter;
   for (iter = l.begin(); iter != l.end(); ++iter) {
     bufferlist& bl = *iter;
-    oid = d->get_pending_oid();
+    oid = d->d3n_get_pending_oid();
     if(oid.empty()) {
-      lsubdout(g_ceph_context, rgw, 0) << "ERROR: flush_read_list(): get_pending_oid() returned empty oid" << dendl;
+      lsubdout(g_ceph_context, rgw, 0) << "ERROR: flush_read_list(): d3n_get_pending_oid() returned empty oid" << dendl;
       r = -ENOENT;
       break;
     }
@@ -213,13 +213,7 @@ int D3nRGWDataCache<T>::flush_read_list(struct get_obj_data* d) {
     }
   }
 
-  d->data_lock.lock();
-  if (r < 0) {
-    d->set_cancelled(r);
-  }
-  d->data_lock.unlock();
   return r;
-
 }
 
 template<typename T>
@@ -246,10 +240,6 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t ob
       if (r < 0)
         return r;
 
-      d->lock.lock();
-      d->total_read += chunk_len;
-      d->lock.unlock();
-
       len -= chunk_len;
       d->offset += chunk_len;
       read_ofs += chunk_len;
@@ -266,7 +256,7 @@ int D3nRGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t ob
   const uint64_t id = obj_ofs; // use logical object offset for sorting replies
   oid = read_obj.oid;
 
-  d->add_pending_oid(oid);
+  d->d3n_add_pending_oid(oid);
 
   if (data_cache.get(read_obj.oid)) {
     auto obj = d->store->svc.rados->obj(read_obj);
