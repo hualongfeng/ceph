@@ -26,6 +26,14 @@
 #include "rgw_threadpool.h"
 #include "rgw_cacherequest.h"
 
+#include "tools/immutable_object_cache/CacheClient.h"
+#include "tools/immutable_object_cache/Types.h"
+#include "tools/immutable_object_cache/SocketCommon.h"
+#include "rgw_ioc_dispatch.h"
+#include <chrono>
+#include <ratio>
+#include <ctime>
+
 enum {
   UPDATE_OBJ,
   REMOVE_OBJ,
@@ -61,6 +69,10 @@ struct ChunkDataInfo : public LRUObject {
 	void dump(Formatter *f) const;
 	static void generate_test_instances(list<ChunkDataInfo*>& o);
 };
+
+
+
+
 
 struct CacheAioWriteRequest{
 	string oid;
@@ -366,6 +378,7 @@ class RGWDataCache : public T
 {
 
   DataCache   data_cache;
+  IOChook     *ioc_hook;
 
 public:
   RGWDataCache() {}
@@ -376,6 +389,9 @@ public:
     ret = T::init_rados();
     if (ret < 0)
       return ret;
+
+    ioc_hook = new IOChook(T::cct);
+    ioc_hook->init();
 
     return 0;
   }
@@ -481,6 +497,14 @@ int RGWDataCache<T>::get_obj_iterate_cb(const rgw_raw_obj& read_obj, off_t obj_o
   librados::IoCtx io_ctx(d->io_ctx);
   io_ctx.locator_set_key(read_obj.loc);
   d->add_pending_oid(read_obj.oid);
+
+  using namespace std::chrono;
+  high_resolution_clock::time_point t1 = high_resolution_clock::now();
+  ioc_hook->read(read_obj.oid, io_ctx.get_namespace(), io_ctx.get_id());
+  high_resolution_clock::time_point t2 = high_resolution_clock::now();
+  duration<double> time_span = duration_cast<duration<double>>(t2 - t1);
+  lsubdout(g_ceph_context, rgw, 5) << "rgw_hook read need to take: " << time_span.count() << " seconds." << dendl;
+
 
   if (data_cache.get(read_obj.oid)) {
     L1CacheRequest* cc;
