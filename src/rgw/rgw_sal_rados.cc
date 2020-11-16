@@ -28,6 +28,7 @@
 #include "rgw_multi.h"
 #include "rgw_acl_s3.h"
 #include "rgw_d3n_datacache.h"
+#include "rgw_ioc_dispatch.h"
 
 /* Stuff for RGWRadosStore.  Move to separate file when store split out */
 #include "rgw_zone.h"
@@ -946,11 +947,11 @@ rgw::sal::RGWRadosStore *RGWStoreManager::init_storage_provider(CephContext *cct
 {
   RGWRados *rados{nullptr};
   use_datacache = cct->_conf->rgw_d3n_l1_local_datacache_enabled;
-  if (use_datacache) {
-    rados = new D3nRGWDataCache<RGWRados>;
-  } else {
-    rados = new RGWRados;
-  }
+  //if (use_datacache) {
+    rados = new IOCRGWDataCache<RGWRados>;
+  //} else {
+  //  rados = new RGWRados;
+  //}
   rgw::sal::RGWRadosStore *store = new rgw::sal::RGWRadosStore();
 
   store->setRados(rados);

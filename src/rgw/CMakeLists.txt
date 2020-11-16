@@ -156,6 +156,7 @@ set(librgw_common_srcs
   rgw_url.cc
   rgw_oidc_provider
   rgw_datalog.cc
+  rgw_ioc_dispatch.cc
   cls_fifo_legacy.cc)
 
 if(WITH_RADOSGW_AMQP_ENDPOINT)
@@ -243,6 +244,7 @@ target_link_libraries(rgw_a
   librados cls_otp_client cls_lock_client cls_rgw_client cls_refcount_client
   cls_log_client cls_timeindex_client cls_version_client cls_cmpomap_client
   cls_user_client cls_rgw_gc_client cls_2pc_queue_client ceph-common common_utf8 global
+  ceph_immutable_object_cache_lib
   ${CURL_LIBRARIES}
   ${EXPAT_LIBRARIES}
   ${OPENLDAP_LIBRARIES} ${CRYPTO_LIBS}

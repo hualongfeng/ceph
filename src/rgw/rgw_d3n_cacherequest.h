@@ -46,7 +46,7 @@ struct D3nL1CacheRequest : public D3nCacheRequest {
   D3nL1CacheRequest() :  D3nCacheRequest(), stat(-1), paiocb(nullptr) {}
   ~D3nL1CacheRequest(){}
 
-  int prepare_op(std::string obj_key, bufferlist* bl, int read_len, int ofs, int read_ofs, std::string& cache_location,
+  int prepare_op(std::string obj_key, bufferlist* bl, int read_len, int ofs, int read_ofs, std::string& object_location,
                  void(*f)(sigval_t), rgw::Aio* aio, rgw::AioResult* r) {
     this->r = r;
     this->aio = aio;
@@ -55,7 +55,7 @@ struct D3nL1CacheRequest : public D3nCacheRequest {
     this->key = obj_key;
     this->len = read_len;
     this->stat = EINPROGRESS;
-    std::string location = cache_location + obj_key;
+    std::string location = object_location;
     struct aiocb* cb = new struct aiocb;
     memset(cb, 0, sizeof(aiocb));
     cb->aio_fildes = ::open(location.c_str(), O_RDONLY);
