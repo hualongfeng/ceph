@@ -34,14 +34,16 @@ public:
 
   int handle_register_client(bool reg);
 
-  void read(std::string oid, std::string pool_ns, int64_t pool_id,
-            off_t read_ofs, off_t read_len, optional_yield y, 
-            rgw::Aio::OpFunc&& radosread, rgw::Aio* aio, rgw::AioResult& r  
-            );
+  template <typename ExectionContext, typename CompletionToken>
+  void async_read(ExectionContext& ctx, std::string oid, std::string pool_ns, int64_t pool_id,
+                   off_t read_ofs, off_t read_len, 
+                   rgw::Aio::OpFunc&& radosread, rgw::Aio* aio, rgw::AioResult& r,
+                   CompletionToken&& token
+                  );
 
-  void handle_read_cache(ceph::immutable_obj_cache::ObjectCacheRequest* ack, std::string oid,
-                                off_t read_ofs, off_t read_len, optional_yield y, 
-                                rgw::Aio::OpFunc&& radosread, rgw::Aio* aio, rgw::AioResult& r 
+  bool handle_read_cache(ceph::immutable_obj_cache::ObjectCacheRequest* ack, std::string oid,
+                                off_t read_ofs, off_t read_len, 
+                                rgw::Aio::OpFunc&& radosread, rgw::Aio* aio, rgw::AioResult& r
                         );
   
   int read_object(const std::string &file_path, bufferlist* read_data, uint64_t offset,
@@ -62,7 +64,57 @@ private:
 };
 
 
+template <typename ExectionContext, typename CompletionToken>
+void IOChook::async_read(ExectionContext& ctx, std::string oid, std::string pool_ns, int64_t pool_id,
+                   off_t read_ofs, off_t read_len, 
+                   rgw::Aio::OpFunc&& radosread, rgw::Aio* aio, rgw::AioResult& r,
+                   CompletionToken&& token
+                  ) { 
+  using Signature = void(boost::system::error_code);
+  /* if IOC daemon still don't startup, or IOC daemon crash,
+     or session occur any error, try to re-connect daemon. */
+  std::unique_lock locker{m_lock};
+  if(!m_cache_client->is_session_work()) {
+    // go to read from rados first
+    lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: session didn't work, go to rados" << oid << dendl;
+    std::move(radosread)(aio,r);
+    // then try to conect to IOC daemon.
+    lsubdout(g_ceph_context, rgw, 5) << "rgw_hook: IOC hook try to re-connect to IOC daemon." << dendl;
+    create_cache_session(nullptr, true);
+    return;
+  }
+  using namespace ceph::immutable_obj_cache;
+  boost::asio::async_completion<CompletionToken, Signature> init(token);
+  auto work = boost::asio::make_work_guard(init.completion_handler, ctx.get_executor());
+  CacheGenContextURef gen_ctx = make_gen_lambda_context<ObjectCacheRequest*,
+                                            std::function<void(ObjectCacheRequest*)>>
+            ([this, w=std::move(work), oid, read_ofs, read_len, 
+            radosread=std::move(radosread), aio, &r, handler=std::move(init.completion_handler)](ObjectCacheRequest* ack) mutable { 
+    
+    bool succeed = handle_read_cache(ack, oid, read_ofs, read_len, std::move(radosread), aio, r);
+    using namespace boost::asio;
+    if(succeed) {
+      boost::asio::post(w.get_executor(), [handler=std::move(handler)]() mutable
+      {
+        handler(boost::system::error_code());
+      });
+    }
 
+    lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: ending callback" << dendl;
+  });
+
+  lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: starting lookup " << dendl;
+	ceph_assert(m_cache_client != nullptr);
+  m_cache_client->lookup_object(pool_ns, 
+                                pool_id,
+                                CEPH_NOSNAP,
+                                oid,
+                                std::move(gen_ctx));
+        
+  lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: ending lookup" << dendl;
+  init.result.get();
+  return;
+}
 
 template <class T>
 class IOCRGWDataCache : public T

@@ -8,6 +8,7 @@
 #include "rgw_aio.h"
 #include "thread"
 #include "chrono"
+#include <boost/asio.hpp>
 
 using namespace ceph::immutable_obj_cache;
 
@@ -83,53 +84,66 @@ int IOChook::handle_register_client(bool reg) {
   return 0;
 }
 
-void IOChook::read(std::string oid, std::string pool_ns, int64_t pool_id,
-                   off_t read_ofs, off_t read_len, optional_yield y, 
-                   rgw::Aio::OpFunc&& radosread, rgw::Aio* aio, rgw::AioResult& r  
-                  ) { 
+// template <typename ExectionContext, typename CompletionToken>
+// void IOChook::read(ExectionContext& ctx, std::string oid, std::string pool_ns, int64_t pool_id,
+//                    off_t read_ofs, off_t read_len, optional_yield y, 
+//                    rgw::Aio::OpFunc&& radosread, rgw::Aio* aio, rgw::AioResult& r,
+//                    CompletionToken&& token
+//                   ) { 
+//   using Signature = void(boost::system::error_code, bufferlist);
+//   /* if IOC daemon still don't startup, or IOC daemon crash,
+//      or session occur any error, try to re-connect daemon. */
+//   std::unique_lock locker{m_lock};
+//   if(!m_cache_client->is_session_work()) {
+//     // go to read from rados first
+//     lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: session didn't work, go to rados" << oid << dendl;
+//     std::move(radosread)(aio,r);
+//     // then try to conect to IOC daemon.
+//     lldout(5) << "rgw_hook: IOC hook try to re-connect to IOC daemon." << dendl;
+//     create_cache_session(nullptr, true);
+//     return;
+//   }
 
-  /* if IOC daemon still don't startup, or IOC daemon crash,
-     or session occur any error, try to re-connect daemon. */
-  std::unique_lock locker{m_lock};
-  if(!m_cache_client->is_session_work()) {
-    // go to read from rados first
-    lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: session didn't work, go to rados" << oid << dendl;
-    std::move(radosread)(aio,r);
-    // then try to conect to IOC daemon.
-    lldout(5) << "rgw_hook: IOC hook try to re-connect to IOC daemon." << dendl;
-    create_cache_session(nullptr, true);
-    return;
-  }
+//   boost::asio::async_completion<CompletionToken, Signature> init(token);
+//   auto work = boost::asio::make_work_guard(init.completion_handler, ctx.get_executor());
+//   CacheGenContextURef gen_ctx = make_gen_lambda_context<ObjectCacheRequest*,
+//                                             std::function<void(ObjectCacheRequest*)>>
+//             ([this, w=std::move(work), oid, read_ofs, read_len, y, radosread=std::move(radosread), aio, &r](ObjectCacheRequest* ack) mutable { 
+//     bufferlist data;
+    
+//     bool succeed = handle_read_cache(ack, oid, read_ofs, read_len, y, std::move(radosread), aio, r, &data);
+//     using namespace boost::asio;
+//     if(succeed) {
+//       dispatch(w.get_executor(), [data=std::move(data), handler=std::move(init.completion_handler)]()mutable
+//       {
+//         handler(boost::system::error_code(), std::move(data));
+//       });
+//     }
 
-  CacheGenContextURef gen_ctx = make_gen_lambda_context<ObjectCacheRequest*,
-                                            std::function<void(ObjectCacheRequest*)>>
-            ([this, oid, read_ofs, read_len, y, radosread=std::move(radosread), aio, &r](ObjectCacheRequest* ack) mutable { 
-    handle_read_cache(ack, oid, read_ofs, read_len, y, std::move(radosread), aio, r);
+//     lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: ending callback" << dendl;
+//   });
 
-    lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: ending callback" << dendl;
-  });
-
-  lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: starting lookup " << dendl;
-	ceph_assert(m_cache_client != nullptr);
-  m_cache_client->lookup_object(pool_ns, 
-                                pool_id,
-                                CEPH_NOSNAP,
-                                oid,
-                                std::move(gen_ctx));
+//   lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: starting lookup " << dendl;
+// 	ceph_assert(m_cache_client != nullptr);
+//   m_cache_client->lookup_object(pool_ns, 
+//                                 pool_id,
+//                                 CEPH_NOSNAP,
+//                                 oid,
+//                                 std::move(gen_ctx));
         
-  lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: ending lookup" << dendl;
-  return;
-}
+//   lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: ending lookup" << dendl;
+//   return;
+// }
 
-void IOChook::handle_read_cache(ObjectCacheRequest* ack, std::string oid,
-                                off_t read_ofs, off_t read_len, optional_yield y,
-                                rgw::Aio::OpFunc&& radosread, rgw::Aio* aio, rgw::AioResult& r  
+bool IOChook::handle_read_cache(ObjectCacheRequest* ack, std::string oid,
+                                off_t read_ofs, off_t read_len,
+                                rgw::Aio::OpFunc&& radosread, rgw::Aio* aio, rgw::AioResult& r
                                 ) {
   if(ack->type != RBDSC_READ_REPLY) {
     // go back to read rados
     lsubdout(g_ceph_context, rgw, 1) << "rgw_hook: IOC cache don't cache object, go to rados " << oid << dendl;
     std::move(radosread)(aio,r);
-    return;
+    return false;
   }
 
   ceph_assert(ack->type == RBDSC_READ_REPLY);
@@ -137,20 +151,13 @@ void IOChook::handle_read_cache(ObjectCacheRequest* ack, std::string oid,
   if(file_path.empty()) {
     lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: file path is empty, go to rados" << oid << dendl;
     std::move(radosread)(aio,r);
-    return;
+    return false;
   }
 	
   lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: ensure should found oid: " << oid << dendl;
   lsubdout(g_ceph_context, rgw, 20) << "rgw_hook: ensure file path: " << file_path << dendl;
 
 //  std::move(radosread)(aio,r);
-/*
-  librados::ObjectReadOperation op;
-  op.read(read_ofs, read_len, nullptr, nullptr);
-  auto cache_read = rgw::Aio::cache_op(std::move(op), y, 0, read_ofs, read_len, file_path);
-  std::move(cache_read)(aio, r);
-*/  
-//  return;
 
   int ret = read_object(file_path, &r.data, read_ofs, read_len);
 
@@ -158,15 +165,10 @@ void IOChook::handle_read_cache(ObjectCacheRequest* ack, std::string oid,
     r.data.clear();
     lsubdout(g_ceph_context, rgw, 20) << " rgw_hook: failed to read from ioc cache, go to rados" << dendl;
     std::move(radosread)(aio,r);
-    return;
+    return false;
   }
 
-
-  std::unique_lock locker{m_put_lock};
-  r.result = 0;
-  aio->put(r);
-  return;
-  
+  return true;
 }
 
 int IOChook::read_object(const std::string &file_path, bufferlist* read_data, uint64_t offset,

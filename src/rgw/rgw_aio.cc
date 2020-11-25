@@ -128,6 +128,8 @@ Aio::OpFunc aio_abstract(Op&& op, boost::asio::io_context& context,
 }
 
 
+
+
 template <typename Op>
 Aio::OpFunc cache_aio_abstract(Op&& op, off_t obj_ofs, off_t read_ofs, off_t read_len, std::string& location) {
   return [op = std::move(op), obj_ofs, read_ofs, read_len, location] (Aio* aio, AioResult& r) mutable{
@@ -178,14 +180,21 @@ Aio::OpFunc ioc_cache_aio_abstract(Op&& op, optional_yield y,
   static_assert(std::is_base_of_v<librados::ObjectOperation, std::decay_t<Op>>);
   static_assert(!std::is_lvalue_reference_v<Op>);
   static_assert(!std::is_const_v<Op>);
+#ifdef HAVE_BOOST_CONTEXT
+  if (y) {
+    return [op = std::move(op), y, read_ofs, read_len, arg] (Aio* aio, AioResult& r) mutable{
+      using namespace boost::asio;
+      async_completion<spawn::yield_context, void()> init(y.get_yield_context());
+      auto ex = get_associated_executor(init.completion_handler);
 
-  auto ioc_hook = (static_cast<IOChook*>(arg));
-
-  return [op = std::move(op), y, read_ofs, read_len, ioc_hook] (Aio* aio, AioResult& r) mutable{
-    auto& ref = r.obj.get_ref();
-    ioc_hook->read(ref.obj.oid, ref.pool.ioctx().get_namespace(), ref.pool.ioctx().get_id(),
-                  read_ofs, read_len, y, aio_abstract(std::move(op), y), aio, r);
-  };
+      auto ioc_hook = (static_cast<IOChook*>(arg));
+      auto& ref = r.obj.get_ref();
+      ioc_hook->async_read(y.get_io_context(), ref.obj.oid, ref.pool.ioctx().get_namespace(), ref.pool.ioctx().get_id(),
+                    read_ofs, read_len, aio_abstract(std::move(op), y), aio, r, bind_executor(ex, Handler{aio, r}));
+    };
+  }
+#endif
+  return aio_abstract(std::forward<Op>(op));
 }
 
 } // anonymous namespace
