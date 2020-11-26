@@ -6996,6 +6996,11 @@ std::vector<Option> get_rgw_options() {
     .set_default(false)
     .set_description("Enable datacenter-scale dataset delivery local cache"),
 
+    Option("rgw_d3n_l1_local_datacache_plugins", Option::TYPE_STR, Option::LEVEL_ADVANCED)
+    .set_default("default")
+    .set_enum_allowed({"default","ioc_cache"})
+    .set_description("implementation of l1 local datacache"),
+
     Option("rgw_d3n_l1_datacache_persistent_path", Option::TYPE_STR, Option::LEVEL_ADVANCED)
     .set_default("/tmp/")
     .set_description("path for the directory for storing the local cache objects data"),
