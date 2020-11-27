@@ -19,6 +19,7 @@
 
 #include "rgw_aio.h"
 #include "rgw_d3n_cacherequest.h"
+#include "rgw_ioc_dispatch.h"
 
 namespace rgw {
 
@@ -169,6 +170,23 @@ Aio::OpFunc cache_aio_abstract(Op&& op, optional_yield y, off_t obj_ofs,
   return cache_aio_abstract(std::forward<Op>(op), obj_ofs, read_ofs, read_len, location);
 }
 
+
+template <typename Op>
+Aio::OpFunc ioc_cache_aio_abstract(Op&& op, optional_yield y,
+                               off_t read_ofs, off_t read_len, void* arg) {
+  static_assert(std::is_base_of_v<librados::ObjectOperation, std::decay_t<Op>>);
+  static_assert(!std::is_lvalue_reference_v<Op>);
+  static_assert(!std::is_const_v<Op>);
+
+  auto ioc_hook = (static_cast<IOChook*>(arg));
+
+  return [op = std::move(op), y, read_ofs, read_len, ioc_hook] (Aio* aio, AioResult& r) mutable{
+    auto& ref = r.obj.get_ref();
+    ioc_hook->read(ref.obj.oid, ref.pool.ioctx().get_namespace(), ref.pool.ioctx().get_id(),
+                  read_ofs, read_len, y, aio_abstract(std::move(op), y), aio, r);
+  };
+}
+
 } // anonymous namespace
 
 Aio::OpFunc Aio::librados_op(librados::ObjectReadOperation&& op,
@@ -183,6 +201,11 @@ Aio::OpFunc Aio::librados_op(librados::ObjectWriteOperation&& op,
 Aio::OpFunc Aio::cache_op(librados::ObjectReadOperation&& op, optional_yield y,
                           off_t obj_ofs, off_t read_ofs, off_t read_len, std::string& location) {
   return cache_aio_abstract(std::move(op), y, obj_ofs, read_ofs, read_len, location);
+}
+
+Aio::OpFunc Aio::ioc_cache_op(librados::ObjectReadOperation&& op, optional_yield y,
+                         off_t read_ofs, off_t read_len, void* arg) {
+  return ioc_cache_aio_abstract(std::move(op), y, read_ofs, read_len, arg);
 }
 
 } // namespace rgw

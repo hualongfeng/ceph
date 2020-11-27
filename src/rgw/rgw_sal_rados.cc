@@ -28,6 +28,7 @@
 #include "rgw_multi.h"
 #include "rgw_acl_s3.h"
 #include "rgw_d3n_datacache.h"
+#include "rgw_ioc_dispatch.h"
 
 #include "rgw_zone.h"
 #include "rgw_rest_conn.h"
@@ -1265,10 +1266,15 @@ rgw::sal::RGWRadosStore *RGWStoreManager::init_storage_provider(CephContext *cct
 {
   RGWRados *rados{nullptr};
   use_datacache = cct->_conf->rgw_d3n_l1_local_datacache_enabled;
+  auto datacache_plugin = cct->_conf->rgw_d3n_l1_local_datacache_plugins;
   if (use_datacache) {
-    rados = new D3nRGWDataCache<RGWRados>;
+    if(datacache_plugin.compare("ioc_cache") == 0) {
+      rados = new IOCRGWDataCache<RGWRados>;
+    }else {
+      rados = new D3nRGWDataCache<RGWRados>;
+    }
   } else {
-    rados = new RGWRados;
+   rados = new RGWRados;
   }
   rgw::sal::RGWRadosStore *store = new rgw::sal::RGWRadosStore();
 
