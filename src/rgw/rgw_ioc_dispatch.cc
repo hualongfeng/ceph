@@ -11,11 +11,17 @@
 
 #include <aio.h>
 #include <errno.h>
+#include "common/error_code.h"
+#include "common/errno.h"
 
 using namespace ceph::immutable_obj_cache;
 
 #define dout_subsys ceph_subsys_rgw
 #define dout_context g_ceph_context
+
+#ifndef O_BINARY
+#define O_BINARY (0)
+#endif /* O_BINARY */
 
 namespace ioc {
 
@@ -23,8 +29,7 @@ namespace detail {
 /// unique_ptr with custom deleter for struct aiocb
 struct AioCBDeleter {
   void operator()(struct aiocb* c) {
-        if(c->aio_buf) free((void*)(c->aio_buf));
-        if(c->aio_fildes > 0) close(c->aio_fildes);
+        if(c->aio_fildes > 0) ::close(c->aio_fildes);
         delete c;
   }
 };
@@ -33,29 +38,29 @@ using unique_aio_cb_ptr = std::unique_ptr<struct aiocb, AioCBDeleter>;
 
 template <typename Result>
 struct AsyncFileReadOp {
+  bufferlist result;
   unique_aio_cb_ptr aio_cb;
   using Signature = void(boost::system::error_code, Result);
   using Completion = ceph::async::Completion<Signature, AsyncFileReadOp<Result>>;
   int init(std::string file_path, off_t read_ofs, off_t read_len, void* arg) {
     aio_cb.reset(new struct aiocb);
     memset(aio_cb.get(), 0, sizeof(struct aiocb));
-    aio_cb->aio_fildes = open(file_path.c_str(), O_RDONLY);
+    aio_cb->aio_fildes = TEMP_FAILURE_RETRY(::open(file_path.c_str(), O_RDONLY|O_CLOEXEC|O_BINARY));
     if(aio_cb->aio_fildes < 0) {
-      dout(2) << "IOC:AsyncFileReadOp open failed" << dendl;
-      return -errno;
+      int err = errno;
+      dout(2) << "IOC:AsyncFileReadOp can't open " << file_path << ": " << cpp_strerror(err) << dendl;
+      return -err;
     }
 
-    aio_cb->aio_buf = malloc(read_len);
-    if(aio_cb->aio_buf == NULL) {
-      dout(2) << "IOC:AsyncFileReadOp malloc failed" << dendl;
-      return -errno;
-    }
+    bufferptr bp(read_len);
+    aio_cb->aio_buf = bp.c_str();
+    result.append(std::move(bp));
 
     aio_cb->aio_nbytes = read_len;
     aio_cb->aio_offset = read_ofs;
     aio_cb->aio_sigevent.sigev_notify = SIGEV_THREAD;
     aio_cb->aio_sigevent.sigev_notify_function = aio_dispatch;
-    aio_cb->aio_sigevent.sigev_notify_attributes = NULL;
+    aio_cb->aio_sigevent.sigev_notify_attributes = nullptr;
     aio_cb->aio_sigevent.sigev_value.sival_ptr = arg;
 
     return 0;
@@ -64,14 +69,13 @@ struct AsyncFileReadOp {
   static void aio_dispatch(sigval_t sigval) {
     auto p = std::unique_ptr<Completion>{static_cast<Completion*>(sigval.sival_ptr)};
     auto op = std::move(p->user_data);
-    const int ret = aio_error(op.aio_cb.get());
+    const int ret = -aio_error(op.aio_cb.get());
     boost::system::error_code ec;
     if (ret < 0) {
         ec.assign(-ret, boost::system::system_category());
     }
-    Result bl;
-    bl.append((char*)(op.aio_cb->aio_buf), op.aio_cb->aio_nbytes);
-    ceph::async::dispatch(std::move(p), ec, std::move(bl));
+
+    ceph::async::dispatch(std::move(p), ec, std::move(op.result));
   }
 
   template <typename Executor1, typename CompletionHandler>
@@ -123,7 +127,7 @@ void file_aio_read_abstract(boost::asio::io_context& context, spawn::yield_conte
   using namespace boost::asio;
   async_completion<spawn::yield_context, void()> init(yield);
   auto ex = get_associated_executor(init.completion_handler);
-  ioc::async_read(context, file_path, read_ofs, read_len, bind_executor(ex, Handler{aio,r}));
+  async_read(context, file_path, read_ofs, read_len, bind_executor(ex, Handler{aio,r}));
 }
 } //anonymous namespace
 

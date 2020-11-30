@@ -42,10 +42,6 @@ public:
                          rgw::Aio::OpFunc&& radosread, rgw::Aio* aio, rgw::AioResult& r
                         );
 
-  int read_object(const std::string &file_path, bufferlist* read_data, uint64_t offset,
-  uint64_t length);
-
-
 public:
   ceph::immutable_obj_cache::CacheClient* get_cache_client() { return m_cache_client;}
 
@@ -72,7 +68,7 @@ public:
     if (ret < 0)
       return ret;
     ioc_hook.init(T::cct);
-    lsubdout(g_ceph_context, rgw, 4) << "rgw hook init " << dendl;
+    lsubdout(g_ceph_context, rgw, 4) << "rgw hook init" << dendl;
     return 0;
   }
 
