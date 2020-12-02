@@ -24,6 +24,7 @@
 #include "rgw_sal.h"
 #include "rgw_sal_rados.h"
 #include "rgw_d3n_datacache.h"
+#include "rgw_ioc_dispatch.h"
 
 #ifdef WITH_RADOSGW_DBSTORE
 #include "rgw_sal_dbstore.h"
@@ -47,6 +48,24 @@ rgw::sal::Store* StoreManager::init_storage_provider(const DoutPrefixProvider* d
     if ((*rados).set_use_cache(use_cache)
                 .set_use_datacache(false)
                 .set_use_gc(use_gc)
+                .set_run_gc_thread(use_gc_thread)
+                .set_run_lc_thread(use_lc_thread)
+                .set_run_quota_threads(quota_threads)
+                .set_run_sync_thread(run_sync_thread)
+                .set_run_reshard_thread(run_reshard_thread)
+                .initialize(cct, dpp) < 0) {
+      delete store; store = nullptr;
+    }
+    return store;
+  }
+  else if (svc.compare("ioc_cache") == 0) {
+    rgw::sal::RadosStore *store = new rgw::sal::RadosStore();
+    RGWRados *rados = new IOCRGWDataCache<RGWRados>;
+    store->setRados(rados);
+    rados->set_store(store);
+
+    if ((*rados).set_use_cache(use_cache)
+                .set_use_datacache(false)
                 .set_run_gc_thread(use_gc_thread)
                 .set_run_lc_thread(use_lc_thread)
                 .set_run_quota_threads(quota_threads)

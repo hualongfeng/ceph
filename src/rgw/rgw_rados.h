@@ -406,7 +406,7 @@ class RGWRados
                          bool follow_olh, optional_yield y, bool assume_noent = false);
   int append_atomic_test(const DoutPrefixProvider *dpp, RGWObjectCtx *rctx, const RGWBucketInfo& bucket_info, const rgw_obj& obj,
                          librados::ObjectOperation& op, RGWObjState **state, optional_yield y);
-  
+
   int update_placement_map();
   int store_bucket_info(RGWBucketInfo& info, std::map<std::string, bufferlist> *pattrs, RGWObjVersionTracker *objv_tracker, bool exclusive);
 
