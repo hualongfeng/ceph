@@ -346,10 +346,11 @@ int radosgw_Main(int argc, const char **argv)
     rgw_d3n_datacache_enabled = false;
   }
   lsubdout(cct, rgw, 1) << "D3N datacache enabled: " << rgw_d3n_datacache_enabled << dendl;
+  auto d3n_local_datacache = cct->_conf->rgw_d3n_l1_local_datacache_backend;
 
   rgw::sal::Store* store =
     StoreManager::get_storage(&dp, g_ceph_context,
-				 (!rgw_d3n_datacache_enabled) ? "rados" : "d3n",
+				 (!rgw_d3n_datacache_enabled) ? "rados" : d3n_local_datacache,
 				 g_conf()->rgw_enable_gc_threads,
 				 g_conf()->rgw_enable_lc_threads,
 				 g_conf()->rgw_enable_quota_threads,
