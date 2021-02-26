@@ -1513,6 +1513,9 @@ do_rgw_create_users()
     echo "  user      : tester"
     echo "  password  : testing"
     echo ""
+
+    $CEPH_BIN/radosgw-admin zonegroup placement add --rgw-zonegroup default --placement-id default-placement --storage-class COLD -c $conf_fn
+    $CEPH_BIN/radosgw-admin zone placement add --rgw-zone default --placement-id default-placement --storage-class COLD --compression zlib --data-pool default.rgw.cold.data -c $conf_fn
 }
 
 do_rgw()

@@ -13787,6 +13787,7 @@ int BlueStore::_do_alloc_write(
   CompressorRef c;
   double crr = 0;
   if (wctx->compress) {
+    dout(20) << "fhl bluestore compress enable" << dendl;
     c = select_option(
       "compression_algorithm",
       compressor,

@@ -4355,14 +4355,14 @@ std::vector<Option> get_global_options() {
     .add_see_also("bluestore_prefer_deferred_size"),
 
     Option("bluestore_compression_mode", Option::TYPE_STR, Option::LEVEL_ADVANCED)
-    .set_default("none")
+    .set_default("force")
     .set_enum_allowed({"none", "passive", "aggressive", "force"})
     .set_flag(Option::FLAG_RUNTIME)
     .set_description("Default policy for using compression when pool does not specify")
     .set_long_description("'none' means never use compression.  'passive' means use compression when clients hint that data is compressible.  'aggressive' means use compression unless clients hint that data is not compressible.  This option is used when the per-pool property for the compression mode is not present."),
 
     Option("bluestore_compression_algorithm", Option::TYPE_STR, Option::LEVEL_ADVANCED)
-    .set_default("snappy")
+    .set_default("zlib")
     .set_enum_allowed({"", "snappy", "zlib", "zstd", "lz4"})
     .set_flag(Option::FLAG_RUNTIME)
     .set_description("Default compression algorithm to use when writing object data")
@@ -4556,7 +4556,7 @@ std::vector<Option> get_global_options() {
     .set_description("max duration to force deferred submit"),
 
     Option("bluestore_rocksdb_options", Option::TYPE_STR, Option::LEVEL_ADVANCED)
-    .set_default("compression=kNoCompression,max_write_buffer_number=4,min_write_buffer_number_to_merge=1,recycle_log_file_num=4,write_buffer_size=268435456,writable_file_max_buffer_size=0,compaction_readahead_size=2097152,max_background_compactions=2,max_total_wal_size=1073741824")
+    .set_default("compression=kZlibCompression,max_write_buffer_number=4,min_write_buffer_number_to_merge=1,recycle_log_file_num=4,write_buffer_size=268435456,writable_file_max_buffer_size=0,compaction_readahead_size=2097152,max_background_compactions=2,max_total_wal_size=1073741824")
     .set_description("Full set of rocksdb settings to override"),
 
     Option("bluestore_rocksdb_options_annex", Option::TYPE_STR, Option::LEVEL_ADVANCED)
