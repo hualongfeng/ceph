@@ -526,8 +526,10 @@ void AbstractWriteLog<I>::pwl_init(Context *on_finish, DeferredContexts &later) 
     }
   } else if ((m_cache_state->present) &&
              (access(m_log_pool_name.c_str(), F_OK) != 0)) {
-    ldout(cct, 5) << "Can't find the existed pool file " << m_log_pool_name << dendl;
+    lderr(cct) << "Can't find the existed pool file "
+                  << m_log_pool_name << dendl;
     on_finish->complete(-errno);
+    return;
   }
 
   bool succeeded = initialize_pool(on_finish, later);
