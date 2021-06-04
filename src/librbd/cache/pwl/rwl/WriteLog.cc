@@ -466,7 +466,7 @@ bool WriteLog<I>::retire_entries(const unsigned long int frees_per_tx) {
     std::lock_guard locker(m_lock);
     initial_first_valid_entry = this->m_first_valid_entry;
     first_valid_entry = this->m_first_valid_entry;
-    auto entry = m_log_entries.front();
+    auto entry = m_log_entries.empty() ? nullptr : m_log_entries.front();
     while (!m_log_entries.empty() &&
            retiring_entries.size() < frees_per_tx &&
            this->can_retire_entry(entry)) {
