@@ -829,10 +829,6 @@ void AbstractWriteLog<I>::write(Extents &&image_extents,
 
   ceph_assert(m_initialized);
 
-  /* Split image extents larger than 1M. This isn't strictly necessary but
-   * makes libpmemobj allocator's job easier and reduces pmemobj_defrag() cost.
-   * We plan to manage pmem space and allocation by ourselves in the future.
-   */
   Extents split_image_extents;
   uint64_t max_extent_size = get_max_extent();
   if (max_extent_size != 0) {
