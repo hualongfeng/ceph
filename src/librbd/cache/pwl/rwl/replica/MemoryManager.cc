@@ -7,10 +7,20 @@
 #include <iostream>
 #include <libpmem.h>
 
-MemoryManager::MemoryManager(uint64_t size, std::string &path) : _size(size) {
-  std::cout << "I'm in MemoryManager::MemoryManager()" << std::endl;
+#include "common/dout.h"
+
+#define dout_context g_ceph_context
+#define dout_subsys ceph_subsys_rwl_replica
+#undef dout_prefix
+#define dout_prefix *_dout << "ceph::rwl_repilca::MemoryManager " << ": " << this << " " \
+                           << __func__ << ": "
+
+namespace ceph::librbd::cache::pwl::rwl::replica {
+
+MemoryManager::MemoryManager(CephContext *cct, uint64_t size, std::string &path)
+  : _size(size), _cct(cct) {
   _path = "/mnt/pmem/" + path;
-  std::cout << "path: " << _path << std::endl;
+  ldout(_cct, 10) << "path: " << _path << dendl;
   _size = size;
   _data = get_memory_from_pmem(path);
   if (_data != nullptr) {
@@ -26,9 +36,8 @@ MemoryManager::MemoryManager(uint64_t size, std::string &path) : _size(size) {
 }
 
 void MemoryManager::init(uint64_t size, std::string &path) {
-  std::cout << "I'm in MemoryManager::init()" << std::endl;
   _path = "/mnt/pmem/" + path;
-  std::cout << "path: " << _path << std::endl;
+  ldout(_cct, 10) << "path: " << _path << dendl;
   _size = size;
   _data = get_memory_from_pmem(_path);
   if (_data != nullptr) {
@@ -43,7 +52,7 @@ void MemoryManager::init(uint64_t size, std::string &path) {
 }
 
 int MemoryManager::close_and_remove() {
-  std::cout << "I'm in MemoryManager::close_and_remove()" << std::endl;
+  ldout(_cct, 20) << dendl;
   if (_data == nullptr) {
     return 0;
   }
@@ -57,7 +66,7 @@ int MemoryManager::close_and_remove() {
 }
 
 MemoryManager::~MemoryManager() {
-  std::cout << "I'm in MemoryManager::~MemoryManager()" << std::endl;
+  ldout(_cct, 20) << dendl;
   if (_data == nullptr) {
     return;
   }
@@ -99,3 +108,5 @@ void* MemoryManager::get_memory_from_dram() {
 
   return _data;
 }
+
+} //namespace ceph::librbd::cache::pwl::rwl::replica

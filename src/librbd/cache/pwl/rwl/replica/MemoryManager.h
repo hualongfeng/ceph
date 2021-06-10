@@ -8,10 +8,15 @@
 #include <string>
 #include <inttypes.h>
 
+#include "common/ceph_context.h"
+#include "include/rados/librados.hpp"
+
+namespace ceph::librbd::cache::pwl::rwl::replica {
+
 class MemoryManager {
 public:
-  MemoryManager(uint64_t size, std::string &path);
-  MemoryManager() {}
+  MemoryManager(CephContext *cct, uint64_t size, std::string &path);
+  MemoryManager(CephContext *cct) : _cct(cct) {}
   ~MemoryManager();
   void init(uint64_t size, std::string &path);
   void *get_pointer();
@@ -26,7 +31,8 @@ private:
   uint64_t _size;
   bool _is_pmem{false};
   std::string _path;
+  CephContext *_cct;
 };
 
-
+} //namespace ceph::librbd::cache::pwl::rwl::replica
 #endif //RPMA_DEMO_MEMORYMANAGER_H

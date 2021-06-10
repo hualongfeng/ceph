@@ -4,6 +4,8 @@
 #include <memory>
 #include <iostream>
 
+namespace ceph::librbd::cache::pwl::rwl::replica {
+
 // The type of a handle is system specific
 // this example uses RPMA I/O handles, which are 
 // plain integer values.
@@ -18,9 +20,7 @@ enum EventType {
 class EventHandler {
 public:
 
-  virtual ~EventHandler() {
-      std::cout << "I'm in EventHandler::~EventHandler()" << std::endl;
-  }
+  virtual ~EventHandler() {}
 
   // Hook method that is called back by the RPMA_Reactor
   // to handle events.
@@ -43,4 +43,5 @@ struct EventHandle {
   EventHandle() {}
 };
 
+} //namespace ceph::librbd::cache::pwl::rwl::replica
 #endif //_EVENT_HANDLER_H_

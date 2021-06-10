@@ -3,7 +3,6 @@
 
 #include "EventHandler.h"
 #include "Reactor.h"
-#include "librpma.h"
 #include <unistd.h>
 #include <inttypes.h>
 #include <atomic>
@@ -11,7 +10,10 @@
 #include "MemoryManager.h"
 #include "RpmaOp.h"
 #include "Types.h"
-#include <rados/librados.hpp>
+#include "include/rados/librados.hpp"
+#include "common/ceph_context.h"
+
+namespace ceph::librbd::cache::pwl::rwl::replica {
 
 struct RpmaPeerDeleter {
   void operator() (struct rpma_peer *peer);
@@ -47,12 +49,12 @@ public:
 
 class EventHandlerInterface : public EventHandler {
 public:
-  EventHandlerInterface(std::weak_ptr<Reactor> reactor_ptr): _reactor_manager(reactor_ptr) {}
-  ~EventHandlerInterface() {
-    std::cout << "I'm in EventHandlerInterface::~EventHandlerInterface()" << std::endl;
-  }
+  EventHandlerInterface(CephContext *cct, std::weak_ptr<Reactor> reactor_ptr): _reactor_manager(reactor_ptr), _cct(cct) {}
+  ~EventHandlerInterface() {}
+  virtual const char* name() const = 0;
 protected:
   std::weak_ptr<Reactor> _reactor_manager;
+  CephContext *_cct;
 };
 
 // Handles client connection requests.
@@ -60,7 +62,8 @@ class AcceptorHandler : public EventHandlerInterface, public std::enable_shared_
 public:
   // Initialize the acceptor endpoint and register
   // with the Initiation Dispatcher
-  AcceptorHandler(const std::string& addr,
+  AcceptorHandler(CephContext *cct,
+                  const std::string& addr,
                   const std::string& port,
                   const std::weak_ptr<Reactor> reactor_manager);
 
@@ -77,7 +80,7 @@ public:
   // Get the I/O  Handle (called by Initiation Dispatcher when
   // Logging Acceptor is registered).
   virtual Handle get_handle(EventType et) const override;
-
+  virtual const char* name() const override { return "AcceptorHandler"; }
 private:
   // Socket factory that accepts client connection.
   Handle _fd;
@@ -90,7 +93,7 @@ private:
 
 class ConnectionHandler : public EventHandlerInterface {
 public:
-  ConnectionHandler(const std::weak_ptr<Reactor> reactor_manager);
+  ConnectionHandler(CephContext *cct, const std::weak_ptr<Reactor> reactor_manager);
   ~ConnectionHandler();
   // virtual int register_self() = 0;
   // virtual int remove_self() = 0;
@@ -112,7 +115,7 @@ public:
 
   int send(std::function<void()> callback);
   int recv(std::function<void()> callback);
-
+  virtual const char* name() const override { return "ConnectionHandler"; }
 protected:
   // Notice: call this function after peer is initialized.
   void init_send_recv_buffer();
@@ -138,13 +141,14 @@ protected:
 class RPMAHandler : public ConnectionHandler, public std::enable_shared_from_this<RPMAHandler>{
 public:
   // Initialize the client request
-  RPMAHandler(std::shared_ptr<struct rpma_peer> peer,
+  RPMAHandler(CephContext *cct,
+              std::shared_ptr<struct rpma_peer> peer,
               struct rpma_ep *ep,
               const std::weak_ptr<Reactor> reactor_manager);
   ~RPMAHandler();
   virtual int register_self() override;
   virtual int remove_self() override;
-
+  virtual const char* name() const override { return "RPMAHandler"; }
 private:
   int register_mr_to_descriptor(enum rpma_op op);
   int get_descriptor_for_write();
@@ -160,7 +164,8 @@ private:
 class ClientHandler : public ConnectionHandler, public std::enable_shared_from_this<ClientHandler> {
 public:
   // Initialize the client request
-  ClientHandler(const std::string& addr,
+  ClientHandler(CephContext *cct,
+                const std::string& addr,
                 const std::string& port,
                 const std::weak_ptr<Reactor> reactor_manager);
 
@@ -182,6 +187,7 @@ public:
   int init_replica(epoch_t cache_id, uint64_t cache_size, std::string pool_name, std::string image_name);
   int close_replica();
   int set_head(void *head_ptr, uint64_t size);
+  virtual const char* name() const override { return "ClientHandler"; }
 private:
   using clock = ceph::coarse_mono_clock;
   using time = ceph::coarse_mono_time;
@@ -196,4 +202,6 @@ private:
   struct rpma_mr_remote* _image_mr;
   std::string _image_name;
 };
+
+} //namespace ceph::librbd::cache::pwl::rwl::replica
 #endif //_EVENT_OP_H_

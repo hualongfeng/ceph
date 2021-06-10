@@ -5,6 +5,8 @@
 #include "include/ceph_assert.h"
 #include "include/encoding.h"
 
+namespace ceph::librbd::cache::pwl::rwl::replica {
+
 #define MSG_SIZE 4096
 
 #define KILOBYTE     (1024UL)
@@ -62,8 +64,7 @@ public:
     RwlReplicaInitRequest(int type) : RwlReplicaRequest(type) {}
     RwlReplicaInitRequest() {}
     virtual ~RwlReplicaInitRequest() {}
-    // int type;                      // 0x1->init, 0x2->finished
-    struct RwlCacheInfo info;  // it is valid only if type == 0x1
+    struct RwlCacheInfo info;
     virtual void encode(ceph::buffer::list &bl) const override;
     virtual void decode(ceph::buffer::list::const_iterator &it) override;
 };
@@ -74,9 +75,7 @@ public:
     RwlReplicaInitRequestReply(int type) : RwlReplicaRequest(type) {}
     RwlReplicaInitRequestReply() {}
     virtual ~RwlReplicaInitRequestReply() {}
-    // int type;                    // 0x11->init successed, 0x12->init failed
-                                 // 0x21->finished successed, 0x22->finished failed
-    struct RpmaConfigDescriptor desc;   // it is valid only if type == 0x11
+    struct RpmaConfigDescriptor desc;
     virtual void encode(ceph::buffer::list &bl) const override;
     virtual void decode(ceph::buffer::list::const_iterator &it) override;
 };
@@ -98,4 +97,5 @@ public:
 };
 WRITE_CLASS_ENCODER(RwlReplicaFinishedRequestReply)
 
+} //namespace ceph::librbd::cache::pwl::rwl::replica
 #endif //CEPH_REPLICA_TYPES_H

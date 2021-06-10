@@ -7,9 +7,18 @@
 #include <memory>
 #include <unordered_map>
 #include "Types.h"
+#include "common/dout.h"
 
-Reactor::Reactor() : stop(false) {
-  std::cout << "I'm in Reactor::Reactor()" << std::endl;
+#define dout_context g_ceph_context
+#define dout_subsys ceph_subsys_rwl_replica
+#undef dout_prefix
+#define dout_prefix *_dout << "ceph::rwl_repilca::Reactor: " << this << " " \
+                           << __func__ << ": "
+
+namespace ceph::librbd::cache::pwl::rwl::replica {
+
+Reactor::Reactor(CephContext *cct) : _stop(false), _cct(cct) {
+  ldout(_cct, 20) << dendl;
   _epoll = epoll_create1(EPOLL_CLOEXEC);
   if (_epoll == -1) {
     throw std::runtime_error("epoll_create1 failed\n");
@@ -17,7 +26,7 @@ Reactor::Reactor() : stop(false) {
 }
 
 Reactor::~Reactor() {
-  std::cout << "I'm in Reactor::~Reactor()" << std::endl;
+  ldout(_cct, 20) << dendl;
   close(_epoll);
 }
 
@@ -35,7 +44,7 @@ int Reactor::fd_set_nonblock(int fd) {
 }
 
 int Reactor::register_handler(EventHandlerPtr eh, EventType et) {
-  std::cout << "I'm in Reactor::register_handler()" << std::endl;
+  ldout(_cct, 20) << "ptr: "<< eh << ", type: "<< et << dendl;
   Handle fd = eh->get_handle(et);
   if (fd == -1) {
     return -1;
@@ -47,8 +56,8 @@ int Reactor::register_handler(EventHandlerPtr eh, EventType et) {
   }
 
   //event_table.emplace(fd, EventHandle{eh, et}); 
-  event_table.emplace(fd, EventHandle());
-  EventHandle &ed = event_table[fd];
+  _event_table.emplace(fd, EventHandle());
+  EventHandle &ed = _event_table[fd];
   ed.type = et;
   ed.handler = eh;
 
@@ -59,7 +68,7 @@ int Reactor::register_handler(EventHandlerPtr eh, EventType et) {
 
   if (epoll_ctl(_epoll, EPOLL_CTL_ADD, eh->get_handle(et), &event)) {
     int err = errno;
-    event_table.erase(fd);
+    _event_table.erase(fd);
     return err;
   }
 
@@ -67,25 +76,25 @@ int Reactor::register_handler(EventHandlerPtr eh, EventType et) {
 }
 
 int Reactor::remove_handler(EventHandlerPtr eh, EventType et) {
-  std::cout << "I'm in Reactor::remove_handler()" << std::endl;
+  ldout(_cct, 20) << "ptr: "<< eh << ", type: "<< et << dendl;
   Handle fd = eh->get_handle(et);
   if (fd == -1) {
     return -1;
   }
 
   epoll_ctl(_epoll, EPOLL_CTL_DEL, fd, NULL);
-  event_table.erase(fd);
+  _event_table.erase(fd);
   return 0;
 }
 
 void Reactor::shutdown() {
-  std::cout << "I'm in Reactor::shutdown()" << std::endl;
-  for (auto &it : event_table) {
+  ldout(_cct, 20) << dendl;
+  for (auto &it : _event_table) {
     Handle fd = it.first;
     epoll_ctl(_epoll, EPOLL_CTL_DEL, fd, NULL);
   }
-  event_table.clear();
-  stop = true;
+  _event_table.clear();
+  _stop = true;
 }
 
 
@@ -95,18 +104,20 @@ int Reactor::handle_events() {
   /* process epoll's events */
   struct epoll_event event;
   EventHandle *event_handle;
-  while (!stop) {
+  while (!_stop) {
     while ((ret = epoll_wait(_epoll, &event, 1 /* # of events */,
                                 0)) == 1) {
       event_handle = static_cast<EventHandle*>(event.data.ptr);
-      std::cout << "I'm in handle_events()  type: " << event_handle->type << std::endl;
+       ldout(_cct, 20) << "type: " << event_handle->type << dendl;
       event_handle->handler->handle(event_handle->type);
       if (empty()) {
-        std::cout << "My event_table is empty!!!" << std::endl;
-        stop = true;
+        ldout(_cct, 10) << "My event_table is empty!!!" << dendl;
+        _stop = true;
         break;
       }
     }
   }
   return ret;
 }
+
+} // namespace ceph::librbd::cache::pwl::rwl::replica
