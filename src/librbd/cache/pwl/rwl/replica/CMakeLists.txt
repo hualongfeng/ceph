@@ -1,0 +1,33 @@
+set(ceph_rwl_replica_files
+  EventOp.cc
+  MemoryManager.cc
+  Reactor.cc
+  Types.cc
+  )
+
+add_library(ceph_rwl_replica_lib STATIC ${ceph_rwl_replica_files})
+
+link_directories(${CMAKE_SOURCE_DIR}/src/librbd/cache/pwl/rwl/replica/lib/)
+
+add_executable(ceph-rwl-replica-server server.cc)
+target_link_libraries(ceph-rwl-replica-server
+  ceph_rwl_replica_lib
+  librados
+  global
+  ceph-common
+  pmem::pmem
+  rpma
+  )
+install(TARGETS ceph-rwl-replica-server DESTINATION bin)
+
+add_executable(ceph-rwl-replica-client client.cc)
+target_link_libraries(ceph-rwl-replica-client
+  ceph_rwl_replica_lib
+  librados
+  global
+  ceph-common
+  pmem::pmem
+  rpma
+  )
+install(TARGETS ceph-rwl-replica-client DESTINATION bin)
+
