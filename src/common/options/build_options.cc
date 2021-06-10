@@ -15,6 +15,7 @@ std::vector<Option> get_rgw_options();
 std::vector<Option> get_rbd_options();
 std::vector<Option> get_rbd_mirror_options();
 std::vector<Option> get_immutable_object_cache_options();
+std::vector<Option> get_rwl_replica_options();
 std::vector<Option> get_mds_options();
 std::vector<Option> get_mds_client_options();
 std::vector<Option> get_cephfs_mirror_options();
@@ -43,6 +44,7 @@ std::vector<Option> build_options()
   ingest(get_rbd_options(), "rbd");
   ingest(get_rbd_mirror_options(), "rbd-mirror");
   ingest(get_immutable_object_cache_options(), "immutable-object-cache");
+  ingest(get_rwl_replica_options(), "rwl-replica");
   ingest(get_mds_options(), "mds");
   ingest(get_mds_client_options(), "mds_client");
   ingest(get_cephfs_mirror_options(), "cephfs-mirror");

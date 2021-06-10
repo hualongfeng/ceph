@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include "Types.h"
 
-Reactor::Reactor() {
+Reactor::Reactor() : stop(false) {
   std::cout << "I'm in Reactor::Reactor()" << std::endl;
   _epoll = epoll_create1(EPOLL_CLOEXEC);
   if (_epoll == -1) {
@@ -78,6 +78,16 @@ int Reactor::remove_handler(EventHandlerPtr eh, EventType et) {
   return 0;
 }
 
+void Reactor::shutdown() {
+  std::cout << "I'm in Reactor::shutdown()" << std::endl;
+  for (auto &it : event_table) {
+    Handle fd = it.first;
+    epoll_ctl(_epoll, EPOLL_CTL_DEL, fd, NULL);
+  }
+  event_table.clear();
+  stop = true;
+}
+
 
 //int Reactor::handle_events(TimeValue *timeout = 0) {
 int Reactor::handle_events() {
@@ -85,14 +95,17 @@ int Reactor::handle_events() {
   /* process epoll's events */
   struct epoll_event event;
   EventHandle *event_handle;
-  while ((ret = epoll_wait(_epoll, &event, 1 /* # of events */,
-                              TIMEOUT_1500S)) == 1) {
-    event_handle = static_cast<EventHandle*>(event.data.ptr);
-    std::cout << "I'm in handle_events()  type: " << event_handle->type << std::endl;
-    event_handle->handler->handle(event_handle->type);
-    if (empty()) {
-      std::cout << "My event_table is empty!!!" << std::endl;
-      break;
+  while (!stop) {
+    while ((ret = epoll_wait(_epoll, &event, 1 /* # of events */,
+                                0)) == 1) {
+      event_handle = static_cast<EventHandle*>(event.data.ptr);
+      std::cout << "I'm in handle_events()  type: " << event_handle->type << std::endl;
+      event_handle->handler->handle(event_handle->type);
+      if (empty()) {
+        std::cout << "My event_table is empty!!!" << std::endl;
+        stop = true;
+        break;
+      }
     }
   }
   return ret;
