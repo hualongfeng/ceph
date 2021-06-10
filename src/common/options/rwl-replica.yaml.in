@@ -1,0 +1,11 @@
+# -*- mode: YAML -*-
+---
+
+options:
+- name: rwl_replica_addr
+  type: str
+  level: advanced
+  desc: rwl replica will listen on the addr
+  default: 192.168.0.20:9000
+  services:
+  - rwl-replica

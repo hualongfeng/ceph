@@ -23,10 +23,13 @@ public:
 
   bool empty() { return event_table.empty(); }
 
+  void shutdown();
+
 private:
   int fd_set_nonblock(int fd);
 
   int _epoll;
+  bool stop{false};
   std::unordered_map<Handle, EventHandle> event_table;
 };
 
