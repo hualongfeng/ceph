@@ -2,6 +2,7 @@
 #include "EventOp.h"
 #include "MemoryManager.h"
 #include "RpmaOp.h"
+#include "Types.h"
 
 #include <inttypes.h>
 #include "librpma.h"
@@ -13,9 +14,15 @@
 #include <thread>
 #include <chrono>
 
-#include "log.h"
-#include "Types.h"
-#include <rados/librados.hpp>
+#include "common/dout.h"
+
+#define dout_context g_ceph_context
+#define dout_subsys ceph_subsys_rwl_replica
+#undef dout_prefix
+#define dout_prefix *_dout << "ceph::rwl_repilca::" << this->name() << ": " << this << " " \
+                           << __func__ << ": "
+
+namespace ceph::librbd::cache::pwl::rwl::replica {
 
 /*
  * common_peer_via_address -- create a new RPMA peer based on ibv_context
@@ -36,22 +43,18 @@ static int common_peer_via_address(const char *addr,
 }
 
 void RpmaPeerDeleter::operator() (struct rpma_peer *peer) {
-  std::cout << "I'm in RpmaPeerDeleter()" << std::endl;
   rpma_peer_delete(&peer);
 }
 
 void RpmaEpDeleter::operator() (struct rpma_ep *ep) {
-  std::cout << "I'm in RpmaEpDeleter()" << std::endl;
   rpma_ep_shutdown(&ep);
 }
 
 void RpmaMRDeleter::operator() (struct rpma_mr_local *mr_ptr) {
-  std::cout << "I'm in RpmaMRDeleter()" << std::endl;
   rpma_mr_dereg(&mr_ptr);
 }
 
 RpmaConn::~RpmaConn() {
-  std::cout << "I'm in RpmaConn::~RpmaConn()" << std::endl;
   if (conn == nullptr) {
     return ;
   }
@@ -72,17 +75,16 @@ struct rpma_conn* RpmaConn::get() {
 }
 
 int RpmaConn::disconnect() {
-  std::cout << "I'm in RpmaConn::disconnect()" << std::endl;
   disconnected = true;
   return rpma_conn_disconnect(conn);
 }
 
-AcceptorHandler::AcceptorHandler(const std::string& addr,
-                   const std::string& port,
-                   const std::weak_ptr<Reactor> reactor_manager)
-  : EventHandlerInterface(reactor_manager), _address(addr), _port(port)
+AcceptorHandler::AcceptorHandler(CephContext *cct,
+                                 const std::string& addr,
+                                 const std::string& port,
+                                 const std::weak_ptr<Reactor> reactor_manager)
+  : EventHandlerInterface(cct, reactor_manager), _address(addr), _port(port)
  {
-  std::cout << "I'm in AcceptorHandler:AcceptorHandler()" << std::endl;
   int ret = 0;
   struct rpma_peer *peer = nullptr;
   ret = common_peer_via_address(addr.c_str(), RPMA_UTIL_IBV_CONTEXT_LOCAL, &peer);
@@ -120,7 +122,7 @@ int AcceptorHandler::remove_self() {
 }
 
 AcceptorHandler::~AcceptorHandler() {
-  std::cout << "I'm in AcceptorHandler::~AcceptorHandler()" << std::endl;
+  ldout(_cct, 20) << dendl;
 }
 
 Handle AcceptorHandler::get_handle(EventType et) const {
@@ -132,19 +134,17 @@ int AcceptorHandler::handle(EventType et) {
   assert(et == ACCEPT_EVENT);
 
   try {
-    std::shared_ptr<RPMAHandler> client_handler = std::make_shared<RPMAHandler>(_peer, _ep.get(), _reactor_manager);
-    client_handler->register_self();
+    std::shared_ptr<RPMAHandler> server_handler = std::make_shared<RPMAHandler>(_cct, _peer, _ep.get(), _reactor_manager);
+    server_handler->register_self();
   } catch (std::runtime_error &e) {
-    std::cout << "Runtime error: " << e.what() << std::endl;
+    lderr(_cct) << "Runtime error: " << e.what() << dendl;
     return -1;
   }
   return 0;
 }
 
-ConnectionHandler::ConnectionHandler(const std::weak_ptr<Reactor> reactor_manager)
-  : EventHandlerInterface(reactor_manager) {
-  std::cout << "I'm in ConnectionHandler::ConnectionHandler()" << std::endl;
-}
+ConnectionHandler::ConnectionHandler(CephContext *cct, const std::weak_ptr<Reactor> reactor_manager)
+  : EventHandlerInterface(cct, reactor_manager) {}
 
 // Notice: call this function after peer is initialized.
 void ConnectionHandler::init_send_recv_buffer() {
@@ -186,10 +186,9 @@ void ConnectionHandler::init_conn_fd() {
 }
 
 ConnectionHandler::~ConnectionHandler() {
-  std::cout << "I'm in ConnectionHandler::~ConnectionHandler()" << std::endl;
-  std::cout << "table size: " << callback_table.size() << std::endl;
+  ldout(_cct, 10) << "table size: " << callback_table.size() << dendl;
   for (auto &it : callback_table) {
-    std::cout << "pointer: " << it << std::endl;
+    ldout(_cct, 20) << "pointer: " << it << dendl;
     auto op_func = std::unique_ptr<RpmaOp>{it};
   }
 }
@@ -215,7 +214,7 @@ int ConnectionHandler::handle(EventType et) {
 }
 
 int ConnectionHandler::handle_connection_event() {
-  std::cout << "I'm in ConnectionHandler::handle_connection_event()" << std::endl;
+  ldout(_cct, 10) << dendl;
   int ret = 0;
   // get next connection's event
   enum rpma_conn_event event;
@@ -224,13 +223,13 @@ int ConnectionHandler::handle_connection_event() {
     if (ret == RPMA_E_NO_EVENT) {
       return 0;
     } else if (ret == RPMA_E_INVAL) {
-      LOG("conn or event is NULL");
+      lderr(_cct) << "conn or event is NULL" << dendl;
     } else if (ret == RPMA_E_UNKNOWN) {
-      LOG("unexpected event");
+      lderr(_cct) << "unexpected event" << dendl;
     } else if (ret == RPMA_E_PROVIDER) {
-      LOG("rdma_get_cm_event() or rdma_ack_cm_event() failed");
+      lderr(_cct) << "rdma_get_cm_event() or rdma_ack_cm_event() failed" << dendl;
     } else if (ret == RPMA_E_NOMEM) {
-      LOG("out of memory");
+      lderr(_cct) << "out of memory" << dendl;
     }
 
     // rpma_conn_disconnect(_conn.get());
@@ -240,15 +239,15 @@ int ConnectionHandler::handle_connection_event() {
 
   /* proceed to the callback specific to the received event */
   if (event == RPMA_CONN_ESTABLISHED) {
-    LOG("RPMA_CONN_ESTABLISHED");
+    ldout(_cct, 10) << "RPMA_CONN_ESTABLISHED" << dendl;
     connected = true;
     return 0;
   } else if (event == RPMA_CONN_CLOSED) {
-    LOG("RPMA_CONN_CLOSED");
+    ldout(_cct, 10) << "RPMA_CONN_CLOSED" << dendl;
   } else if (event == RPMA_CONN_LOST) {
-    LOG("RPMA_CONN_LOST");
+    ldout(_cct, 10) << "RPMA_CONN_LOST" << dendl;
   } else {
-    LOG("RPMA_CONN_UNDEFINED");
+    ldout(_cct, 10) << "RPMA_CONN_UNDEFINED" << dendl;
   }
   connected = false;
   ret = remove_self();
@@ -256,7 +255,7 @@ int ConnectionHandler::handle_connection_event() {
 }
 
 int ConnectionHandler::handle_completion() {
-  std::cout << "I'm in ConnectionHandler::handle_completion()" << std::endl;
+  ldout(_cct, 10) << dendl;
   int ret = 0;
 
   /* prepare detected completions for processing */
@@ -266,9 +265,9 @@ int ConnectionHandler::handle_completion() {
     if (ret == RPMA_E_NO_COMPLETION) {
       return 0;
     } else if (ret == RPMA_E_INVAL) {
-      LOG("conn is NULL: %s", rpma_err_2str(ret));
+      lderr(_cct) << "conn is NULL: " << rpma_err_2str(ret) << dendl;
     } else if (ret == RPMA_E_PROVIDER) {
-      LOG("ibv_poll_cq(3) failed with a provider error: %s", rpma_err_2str(ret));
+      lderr(_cct) << "ibv_poll_cq(3) failed with a provider error: " << rpma_err_2str(ret) << dendl;
     }
 
     /* another error occured - disconnect */
@@ -284,14 +283,14 @@ int ConnectionHandler::handle_completion() {
     if (ret == RPMA_E_NO_COMPLETION) {
       return 0;
     } else if (ret == RPMA_E_INVAL) {
-      LOG("conn or cmpl is NULL: %s", rpma_err_2str(ret));
+      lderr(_cct) << "conn or cmpl is NULL: " << rpma_err_2str(ret) << dendl;
     } else if (ret == RPMA_E_PROVIDER) {
-      LOG("ibv_poll_cq(3) failed with a provider error: %s", rpma_err_2str(ret));
+      lderr(_cct) << "ibv_poll_cq(3) failed with a provider error: " << rpma_err_2str(ret) << dendl;
     } else if (ret == RPMA_E_UNKNOWN) {
-      LOG("ibv_poll_cq(3) failed but no provider error is available: %s", rpma_err_2str(ret));
+      lderr(_cct) << "ibv_poll_cq(3) failed but no provider error is available: " << rpma_err_2str(ret) << dendl;
     } else {
       // RPMA_E_NOSUPP
-      LOG("Not supported opcode: %s", rpma_err_2str(ret));
+      lderr(_cct) << "Not supported opcode: " << rpma_err_2str(ret) << dendl;
     }
 
     /* another error occured - disconnect */
@@ -301,34 +300,36 @@ int ConnectionHandler::handle_completion() {
 
   /* validate received completion */
   if (cmpl.op_status != IBV_WC_SUCCESS) {
-    (void) LOG("[op: %d] received completion is not as expected (%d != %d)\n",
-               cmpl.op,
-               cmpl.op_status,
-               IBV_WC_SUCCESS);
-
+    ldout(_cct, 1) << "[op: " << cmpl.op << "] "
+                   << "received completion is not as expected "
+                   << "("
+                   << cmpl.op_status << " != " << IBV_WC_SUCCESS
+                   << ")"
+                   << dendl;
     return ret;
   }
 
   if (cmpl.op == RPMA_OP_RECV) {
-    LOG("RPMA_OP_RECV");
+    ldout(_cct, 10) << "RPMA_OP_RECV" << dendl;
   } else if ( cmpl.op == RPMA_OP_SEND) {
-    LOG("RPMA_OP_SEND");
+    ldout(_cct, 10) << "RPMA_OP_SEND" << dendl;
   } else if (cmpl.op == RPMA_OP_WRITE) {
-    LOG("RPMA_OP_WRITE");
+    ldout(_cct, 10) << "RPMA_OP_WRITE" << dendl;
   } else if (cmpl.op == RPMA_OP_FLUSH) {
-    LOG("RPMA_OP_FLUSH");
+    ldout(_cct, 10) << "RPMA_OP_FLUSH" << dendl;
   } else if (cmpl.op == RPMA_OP_READ) {
-    LOG("RPMA_OP_READ");
+    ldout(_cct, 10) << "RPMA_OP_READ" << dendl;
   } else {
-    LOG("operation: %d\n. Shouldn't step in this", cmpl.op);
+    ldout(_cct, 5) << "operation: "
+                   << cmpl.op
+                   << ". Shouldn't step in this."
+                   << dendl;
   }
 
   if (cmpl.op_context != nullptr) {
     auto op_func = std::unique_ptr<RpmaOp>{static_cast<RpmaOp*>(const_cast<void *>(cmpl.op_context))};
     callback_table.erase(op_func.get());
     op_func->do_callback();
-  } else {
-    LOG("op_context is nullptr");
   }
   return ret;
 }
@@ -355,11 +356,11 @@ int ConnectionHandler::recv(std::function<void()> callback) {
   return ret;
 }
 
-RPMAHandler::RPMAHandler(std::shared_ptr<struct rpma_peer> peer,
+RPMAHandler::RPMAHandler(CephContext *cct,
+                         std::shared_ptr<struct rpma_peer> peer,
                          struct rpma_ep *ep,
                          const std::weak_ptr<Reactor> reactor_manager)
-  : ConnectionHandler(reactor_manager) {
-  std::cout << "I'm in RPMAHandler::RPMAHandler()" << std::endl;
+  : ConnectionHandler(cct, reactor_manager), data_manager(cct) {
   _peer = peer;
   int ret = 0;
 
@@ -422,7 +423,7 @@ int RPMAHandler::remove_self() {
 }
 
 RPMAHandler::~RPMAHandler() {
-  std::cout << "I'm in ~RPMAHandler()" << std::endl;
+  ldout(_cct, 20) << dendl;
 }
 
 int RPMAHandler::register_mr_to_descriptor(enum rpma_op op) {
@@ -441,15 +442,15 @@ int RPMAHandler::register_mr_to_descriptor(enum rpma_op op) {
 //  break;
 //  don't resolve read operation
     default:
-      LOG("Warn: Don't step in this\n");
-      break;
+      ldout(_cct, 1) << "Warn: Don't step in this." << dendl;
+      return -1;
   }
 
   /* register the memory */
   rpma_mr_local *mr{nullptr};
   if ((ret = rpma_mr_reg(_peer.get(), data_manager.get_pointer(), data_manager.size(),
                        usage, &mr))) {
-    LOG("%s", rpma_err_2str(ret));
+    ldout(_cct, 1) << rpma_err_2str(ret) << dendl;
     return ret;
   }
   data_mr.reset(mr);
@@ -478,7 +479,7 @@ int RPMAHandler::register_mr_to_descriptor(enum rpma_op op) {
       ret = rpma_peer_cfg_set_direct_write_to_pmem(pcfg, true);
       if (ret) {
         (void) rpma_peer_cfg_delete(&pcfg);
-        LOG("rpma_peer_cfg_set_direct_write_to_pmem failed");
+        ldout(_cct, 1) << "rpma_peer_cfg_set_direct_write_to_pmem failed: " << rpma_err_2str(ret) << dendl;
         return ret;
       }
     }
@@ -509,7 +510,11 @@ int RPMAHandler::get_descriptor_for_write() {
   RwlReplicaInitRequest init;
   auto it = recv_bl.cbegin();
   init.decode(it);
-  LOG("Alloc memory size: %" PRIu64 "\n", init.info.cache_size);
+  ldout(_cct, 5) << "cache_id: " << init.info.cache_id << "\n"
+                  << "cache_size: " << init.info.cache_size << "\n"
+                  << "pool_name: " << init.info.pool_name << "\n"
+                  << "image_name: " << init.info.image_name << "\n"
+                  << dendl;
 
   std::string path("rbd-pwl." + init.info.pool_name + "." + init.info.image_name + ".pool." + std::to_string(init.info.cache_id));
   if (data_manager.get_pointer() == nullptr) {
@@ -524,7 +529,10 @@ int RPMAHandler::close() {
   if (data_manager.close_and_remove()) {
     reply.type = RWL_REPLICA_FINISHED_FAILED;
   }
-  LOG("%d", reply.type);
+  ldout(_cct, 5) << "succeed to remove cachefile: "
+                 << (reply.type != RWL_REPLICA_FINISHED_FAILED)
+                 << dendl;
+
   bufferlist bl;
   reply.encode(bl);
   assert(bl.length() < MSG_SIZE);
@@ -543,14 +551,16 @@ int RPMAHandler::get_descriptor() {
     case RWL_REPLICA_FINISHED_REQUEST:
       return close();
     default:
-      LOG("the op:%d isn't supported now", request.type);
+      ldout(_cct, 1) << "the operation isn't supported now. op: "
+                     << request.type
+                     << dendl;
   }
   return -1;
 }
 
 void RPMAHandler::deal_require() {
   get_descriptor();
-
+  //TODO: When it meet the close operation, don't do the recv operation
   /* prepare a receive for the client's response */
   std::unique_ptr<RpmaRecv> rec = std::make_unique<RpmaRecv>([self=this](){
     self->deal_require();
@@ -566,11 +576,11 @@ void RPMAHandler::deal_require() {
 }
 
 
-ClientHandler::ClientHandler(const std::string& addr,
+ClientHandler::ClientHandler(CephContext *cct,
+                             const std::string& addr,
                              const std::string& port,
                              const std::weak_ptr<Reactor> reactor_manager)
-    : ConnectionHandler(reactor_manager), _address(addr), _port(port) {
-  std::cout << "I'm in ClientHandler::ClientHandler()" << std::endl;
+    : ConnectionHandler(cct, reactor_manager), _address(addr), _port(port) {
   int ret = 0;
   struct rpma_peer *peer = nullptr;
   ret = common_peer_via_address(addr.c_str(), RPMA_UTIL_IBV_CONTEXT_REMOTE, &peer);
@@ -613,7 +623,7 @@ ClientHandler::ClientHandler(const std::string& addr,
 }
 
 ClientHandler::~ClientHandler() {
-  std::cout << "I'm in ClientHandler::~ClientHandler()" << std::endl;
+  ldout(_cct, 20)  << dendl;
 }
 
 int ClientHandler::register_self() {
@@ -645,7 +655,7 @@ int ClientHandler::get_remote_descriptor() {
   auto it = recv_bl.cbegin();
   init_reply.decode(it);
   int ret = 0;
-  LOG("init_reply.type: %d", init_reply.type);
+  ldout(_cct, 5) << "init request reply: " << init_reply.type << dendl;
   if (init_reply.type == RWL_REPLICA_INIT_SUCCESSED) {
     struct RpmaConfigDescriptor *dst_data = &(init_reply.desc);
     // Create a remote peer configuration structure from the received
@@ -662,27 +672,28 @@ int ClientHandler::get_remote_descriptor() {
 
     // Create a remote memory registration structure from received descriptor
     if ((ret = rpma_mr_remote_from_descriptor(&dst_data->descriptors[0], dst_data->mr_desc_size, &_image_mr))) {
-      LOG("%s", rpma_err_2str(ret));
+      ldout(_cct, 1) << rpma_err_2str(ret) << dendl;
     }
 
     //get the remote memory region size
     size_t size;
     if ((ret = rpma_mr_remote_get_size(_image_mr, &size))) {
-      LOG("%s", rpma_err_2str(ret));
+      ldout(_cct, 1) << rpma_err_2str(ret) << dendl;
     }
 
     if (size < _image_size) {
-      LOG("%s:%d: Remote memory region size too small for writing the"
-      " data of the assumed size (%zu < %ld)",
-      __FILE__, __LINE__, size, _image_size);
+      ldout(_cct, 1) << "Remote memory region size too small "
+                     << "for writing the  data of the assumed size ("
+                     << size << " < " << _image_size << ")"
+                     << dendl;
       return -1;
     }
     /* determine the flush type */
     if (direct_write_to_pmem) {
-      LOG("RPMA_FLUSH_TYPE_PERSISTENT is supported");
+      ldout(_cct, 10) << "RPMA_FLUSH_TYPE_PERSISTENT is supported" << dendl;
       _flush_type = RPMA_FLUSH_TYPE_PERSISTENT;
     } else {
-      LOG("RPMA_FLUSH_TYPE_PERSISTENT is NOT supported");
+      ldout(_cct, 10) << "RPMA_FLUSH_TYPE_PERSISTENT is NOT supported" << dendl;
       _flush_type = RPMA_FLUSH_TYPE_VISIBILITY;
     }
   }
@@ -691,7 +702,7 @@ int ClientHandler::get_remote_descriptor() {
 
 int ClientHandler::init_replica(epoch_t cache_id, uint64_t cache_size, std::string pool_name, std::string image_name) {
   _image_size = cache_size;
-  LOG("");
+  ldout(_cct, 20) << dendl;
   RwlReplicaInitRequest init(RWL_REPLICA_INIT_REQUEST);
   init.info.cache_id = cache_id;
   init.info.cache_size = cache_size;
@@ -715,12 +726,12 @@ int ClientHandler::init_replica(epoch_t cache_id, uint64_t cache_size, std::stri
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     cost_time = duration.count();
   }
-  LOG("End: %lf", cost_time);
+  ldout(_cct, 10) << "cost time: " << cost_time << dendl;
   return (completed == true ? 0 : -1);
 }
 
 int ClientHandler::close_replica() {
-  LOG("");
+  ldout(_cct, 20) << dendl;
   RwlReplicaFinishedRequest finish(RWL_REPLICA_FINISHED_REQUEST);
   bufferlist bl;
   finish.encode(bl);
@@ -749,7 +760,7 @@ int ClientHandler::close_replica() {
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     cost_time = duration.count();
   }
-  LOG("End: %lf", cost_time);
+  ldout(_cct, 10) << "cost time: " << cost_time << dendl;
   return ((completed == true && successed == true) ? 0 : -1);
 }
 
@@ -795,3 +806,6 @@ int ClientHandler::flush(size_t offset,
   }
   return ret;
 }
+
+
+} //namespace ceph::librbd::cache::pwl::rwl::replica

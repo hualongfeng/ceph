@@ -16,7 +16,6 @@
 #include <unordered_map>
 #include <thread>
 #include <fstream>
-#include "log.h"
 
 #include "Reactor.h"
 #include "EventHandler.h"

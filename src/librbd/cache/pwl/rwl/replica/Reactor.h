@@ -2,13 +2,15 @@
 #define _REACTOR_H_
 
 #include "EventHandler.h"
+#include "common/ceph_context.h"
 #include <unordered_map>
 
-typedef int TimeValue;
+namespace ceph::librbd::cache::pwl::rwl::replica {
+
 
 class Reactor {
 public:
-  Reactor();
+  Reactor(CephContext *cct);
   ~Reactor();
 
   // Register an EventHandler of a particular EventType.
@@ -21,7 +23,7 @@ public:
   //int handle_events(TimeValue *timeout = 0);
   int handle_events();
 
-  bool empty() { return event_table.empty(); }
+  bool empty() { return _event_table.empty(); }
 
   void shutdown();
 
@@ -29,8 +31,10 @@ private:
   int fd_set_nonblock(int fd);
 
   int _epoll;
-  bool stop{false};
-  std::unordered_map<Handle, EventHandle> event_table;
+  bool _stop{false};
+  CephContext *_cct;
+  std::unordered_map<Handle, EventHandle> _event_table;
 };
 
+} // namespace ceph::librbd::cache::pwl::rwl::replica
 #endif //_REACTOR_H_

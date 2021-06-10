@@ -1,5 +1,7 @@
 #include "Types.h"
-#include <rados/librados.hpp>
+#include "include/rados/librados.hpp"
+
+namespace ceph::librbd::cache::pwl::rwl::replica {
 
 void RwlCacheInfo::encode(bufferlist &bl) const {
   using ceph::encode;
@@ -84,3 +86,5 @@ void RwlReplicaInitRequestReply::decode(bufferlist::const_iterator &it) {
   decode(desc, it);
   DECODE_FINISH(it);
 }
+
+} //namespace ceph::librbd::cache::pwl::rwl::replica

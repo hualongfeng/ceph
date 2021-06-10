@@ -1,7 +1,6 @@
 #include <inttypes.h>
 #include <iostream>
 #include <vector>
-#include "log.h"
 
 #include "Reactor.h"
 #include "EventHandler.h"
@@ -13,6 +12,8 @@
 #include "common/errno.h"
 #include "global/global_init.h"
 #include "global/signal_handler.h"
+
+using namespace ceph::librbd::cache::pwl::rwl::replica;
 
 void usage() {
   std::cout << "usage: ceph-rwl-replica-server [options...]\n";
@@ -78,8 +79,8 @@ int main(int argc, const char* argv[]) {
 
   int r = 0;
   try {
-    reactor = std::make_shared<Reactor>();
-    std::shared_ptr<AcceptorHandler> rpma_acceptor = std::make_shared<AcceptorHandler>(ip, port, reactor);
+    reactor = std::make_shared<Reactor>(g_ceph_context);
+    std::shared_ptr<AcceptorHandler> rpma_acceptor = std::make_shared<AcceptorHandler>(g_ceph_context, ip, port, reactor);
     if ((r = rpma_acceptor->register_self())) {
       goto cleanup;
     }
@@ -89,6 +90,7 @@ int main(int argc, const char* argv[]) {
   }
 
  cleanup:
+  reactor.reset();
   unregister_async_signal_handler(SIGHUP, sighup_handler);
   unregister_async_signal_handler(SIGINT, handle_signal);
   unregister_async_signal_handler(SIGTERM, handle_signal);

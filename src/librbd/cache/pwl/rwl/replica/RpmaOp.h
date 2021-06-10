@@ -2,16 +2,23 @@
 #define _RPMA_OP_H_
 
 #include <functional>
-#include "librpma.h"
 #include <memory>
 #include <atomic>
+
+
+extern "C" {
+#include "librpma.h"
+}
+
+
+namespace ceph::librbd::cache::pwl::rwl::replica {
 
 class RpmaOp {
   std::function<void()> func;
 public:
   RpmaOp(std::function<void()> f) : func(f) {}
   void do_callback() { if(func) func(); }
-  virtual ~RpmaOp() { std::cout << "I'm in Rpma::~Rpma()" << std::endl; };
+  virtual ~RpmaOp() {};
 };
 
 class RpmaRecv : public RpmaOp {
@@ -115,4 +122,5 @@ public:
   }
 };
 
+} //namespace ceph::librbd::cache::pwl::rwl::replica
 #endif //_RPMA_OP_H_
