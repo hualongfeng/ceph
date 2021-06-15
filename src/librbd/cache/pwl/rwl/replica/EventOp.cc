@@ -510,15 +510,15 @@ int RPMAHandler::get_descriptor_for_write() {
   RwlReplicaInitRequest init;
   auto it = recv_bl.cbegin();
   init.decode(it);
-  ldout(_cct, 5) << "cache_id: " << init.info.cache_id << "\n"
+  ldout(_cct, 5) << "\ncache_id: " << init.info.cache_id << "\n"
                   << "cache_size: " << init.info.cache_size << "\n"
                   << "pool_name: " << init.info.pool_name << "\n"
                   << "image_name: " << init.info.image_name << "\n"
                   << dendl;
 
-  std::string path("rbd-pwl." + init.info.pool_name + "." + init.info.image_name + ".pool." + std::to_string(init.info.cache_id));
+  std::string cachefile_name("rbd-pwl." + init.info.pool_name + "." + init.info.image_name + ".pool." + std::to_string(init.info.cache_id));
   if (data_manager.get_pointer() == nullptr) {
-    data_manager.init(init.info.cache_size, path);
+    data_manager.init(init.info.cache_size, _cct->_conf->rwl_replica_path + "/" + cachefile_name);
   }
   return register_mr_to_descriptor(RPMA_OP_FLUSH);
 }

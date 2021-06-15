@@ -9,3 +9,4 @@
 #include "rbd-mirror_legacy_options.h"
 #include "immutable-object-cache_legacy_options.h"
 #include "rgw_legacy_options.h"
+#include "rwl-replica_legacy_options.h"

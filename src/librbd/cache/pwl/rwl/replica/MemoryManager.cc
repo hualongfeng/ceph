@@ -17,9 +17,8 @@
 
 namespace ceph::librbd::cache::pwl::rwl::replica {
 
-MemoryManager::MemoryManager(CephContext *cct, uint64_t size, std::string &path)
-  : _size(size), _cct(cct) {
-  _path = "/mnt/pmem/" + path;
+MemoryManager::MemoryManager(CephContext *cct, uint64_t size, std::string path)
+  : _size(size), _path(path), _cct(cct) {
   ldout(_cct, 10) << "path: " << _path << dendl;
   _size = size;
   _data = get_memory_from_pmem(path);
@@ -35,8 +34,8 @@ MemoryManager::MemoryManager(CephContext *cct, uint64_t size, std::string &path)
   }
 }
 
-void MemoryManager::init(uint64_t size, std::string &path) {
-  _path = "/mnt/pmem/" + path;
+void MemoryManager::init(uint64_t size, std::string path) {
+  _path = path;
   ldout(_cct, 10) << "path: " << _path << dendl;
   _size = size;
   _data = get_memory_from_pmem(_path);

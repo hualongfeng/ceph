@@ -15,10 +15,10 @@ namespace ceph::librbd::cache::pwl::rwl::replica {
 
 class MemoryManager {
 public:
-  MemoryManager(CephContext *cct, uint64_t size, std::string &path);
+  MemoryManager(CephContext *cct, uint64_t size, std::string path);
   MemoryManager(CephContext *cct) : _cct(cct) {}
   ~MemoryManager();
-  void init(uint64_t size, std::string &path);
+  void init(uint64_t size, std::string path);
   void *get_pointer();
   uint64_t size() {return _size;}
   bool is_pmem() { return _is_pmem;}
