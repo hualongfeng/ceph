@@ -77,6 +77,12 @@ int main(int argc, const char* argv[]) {
   std::string ip   = replica_addr.substr(0, pos);
   std::string port = replica_addr.substr(pos + 1);
 
+  librados::Rados rados;
+  rados.init_with_context(g_ceph_context);
+  rados.connect();
+  std::cout << "get_instance_id: " << rados.get_instance_id() << std::endl;
+  std::cout << "get_instance_id: " << rados.get_instance_id() << std::endl;
+
   int r = 0;
   try {
     reactor = std::make_shared<Reactor>(g_ceph_context);
