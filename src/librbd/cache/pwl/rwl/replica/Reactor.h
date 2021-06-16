@@ -5,7 +5,7 @@
 #include "common/ceph_context.h"
 #include <unordered_map>
 
-namespace ceph::librbd::cache::pwl::rwl::replica {
+namespace librbd::cache::pwl::rwl::replica {
 
 
 class Reactor {

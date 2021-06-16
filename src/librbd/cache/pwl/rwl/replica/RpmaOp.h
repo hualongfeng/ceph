@@ -11,7 +11,7 @@ extern "C" {
 }
 
 
-namespace ceph::librbd::cache::pwl::rwl::replica {
+namespace librbd::cache::pwl::rwl::replica {
 
 class RpmaOp {
   std::function<void()> func;

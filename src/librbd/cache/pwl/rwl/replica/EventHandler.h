@@ -4,7 +4,7 @@
 #include <memory>
 #include <iostream>
 
-namespace ceph::librbd::cache::pwl::rwl::replica {
+namespace librbd::cache::pwl::rwl::replica {
 
 // The type of a handle is system specific
 // this example uses RPMA I/O handles, which are 
