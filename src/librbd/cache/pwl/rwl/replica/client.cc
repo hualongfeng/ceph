@@ -82,33 +82,72 @@ int main(int argc, const char* argv[]) {
   rpma_log_set_threshold(RPMA_LOG_THRESHOLD_AUX, RPMA_LOG_LEVEL_INFO);
 
 
-  // int r = 0;
-  // librados::Rados rados;
-  // librados::IoCtx io_ctx;
-  // std::string poolname = g_conf().get_val<std::string>("rbd_persistent_replicated_cache_cls_pool");
-  // cls::rbd::RwlCacheDaemonInfo d_info;
+  int r = 0;
+  librados::Rados rados;
+  librados::IoCtx io_ctx;
+  std::string poolname = g_conf().get_val<std::string>("rbd_persistent_replicated_cache_cls_pool");
+  cls::rbd::RwlCacheDaemonInfo d_info;
 
-  // r = rados.init_with_context(g_ceph_context);
-  // if (r < 0) {
-  //   return -r;
-  // }
+  r = rados.init_with_context(g_ceph_context);
+  if (r < 0) {
+    return -r;
+  }
 
-  // r = rados.connect();
-  // if (r < 0) {
-  //   std::cerr << "rwl-replica: failed to connect to cluster: " << cpp_strerror(r) << std::endl;
-  //   return -r;
-  // }
+  r = rados.connect();
+  if (r < 0) {
+    std::cerr << "rwl-replica: failed to connect to cluster: " << cpp_strerror(r) << std::endl;
+    return -r;
+  }
 
-  // r = rados.ioctx_create(poolname.c_str(), io_ctx);
-  // if (r < 0) {
-  //   std::cerr << "rwl-replica: failed to access pool " << poolname << ": "
-  //             << cpp_strerror(r) << std::endl;
-  //   return -r;
-  // }
+  r = rados.ioctx_create(poolname.c_str(), io_ctx);
+  if (r < 0) {
+    std::cerr << "rwl-replica: failed to access pool " << poolname << ": "
+              << cpp_strerror(r) << std::endl;
+    return -r;
+  }
 
-  // cls::rbd::RwlCacheRequest req = {
-  //   rados.get_instance_id();
-  // };
+  cls::rbd::RwlCacheRequest req = {
+    rados.get_instance_id(),
+    10UL * 1024 * 1024 * 1024,
+    3
+  };
+  epoch_t cache_id;
+
+  r = rwlcache_request(&io_ctx, req, cache_id);
+  if (r != 0) {
+    std::cout << "rwlcache_request: " << r << cpp_strerror(r) << std::endl;
+    return -r;
+  }
+
+  cls::rbd::RwlCacheInfo info;
+  r = rwlcache_get_cacheinfo(&io_ctx, cache_id, info);
+  if (r != 0) {
+    std::cout << "rwlcache_get_cacheinfo: " << r << cpp_strerror(r) << std::endl;
+    return -r;
+  }
+
+  assert(info.cache_id == cache_id);
+
+  for (auto &daemon : info.daemons) {
+    std::cout << "id: " << daemon.id << ", "
+              << "rdma_address: " << daemon.rdma_address << ", "
+              << "rdma_port: " << daemon.rdma_port
+              << std::endl;
+  }
+
+  cls::rbd::RwlCacheRequestAck ack = {cache_id, 0};
+  r = rwlcache_request_ack(&io_ctx, ack);
+  if (r != 0) {
+    std::cout << "rwlcache_request_ack: " << r << cpp_strerror(r) << std::endl;
+    return -r;
+  }
+
+  cls::rbd::RwlCacheFree free = {cache_id};
+  r = rwlcache_free(&io_ctx, free);
+  if (r != 0) {
+    std::cout << "rwlcache_free: " << r << cpp_strerror(r) << std::endl;
+    return -r;
+  }
 
 
   std::string replica_addr = g_conf().get_val<std::string>("rwl_replica_addr");

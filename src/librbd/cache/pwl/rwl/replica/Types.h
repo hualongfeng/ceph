@@ -4,6 +4,7 @@
 #include <inttypes.h>
 #include "include/ceph_assert.h"
 #include "include/encoding.h"
+#include "include/types.h"
 
 namespace librbd::cache::pwl::rwl::replica {
 
@@ -18,7 +19,6 @@ namespace librbd::cache::pwl::rwl::replica {
 #define TIMEOUT_15S   (15000) /* [msec] == 15s */
 #define TIMEOUT_1500S (1500000) /* [msec] == 1500s */
 
-typedef __u32 epoch_t;
 
 
 const int RWL_REPLICA_INIT_REQUEST        = 0x1;
