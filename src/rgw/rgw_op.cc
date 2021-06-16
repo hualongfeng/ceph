@@ -400,8 +400,9 @@ static int get_multipart_info(const DoutPrefixProvider *dpp, struct req_state *s
 }
 
 static int get_multipart_info(const DoutPrefixProvider *dpp, struct req_state *s,
-			      const string& meta_oid,
-                              multipart_upload_info *upload_info)
+                              const string& meta_oid,
+                              multipart_upload_info *upload_info,
+                              rgw::sal::Attrs* attrs = nullptr)
 {
   map<string, bufferlist>::iterator iter;
   bufferlist header;
@@ -410,7 +411,11 @@ static int get_multipart_info(const DoutPrefixProvider *dpp, struct req_state *s
   meta_obj = s->bucket->get_object(rgw_obj_key(meta_oid, string(), mp_ns));
   meta_obj->set_in_extra_data(true);
 
-  return get_multipart_info(dpp, s, meta_obj.get(), upload_info);
+  int ret = get_multipart_info(dpp, s, meta_obj.get(), upload_info);
+  if (ret >= 0 && attrs) {
+    *attrs = meta_obj->get_attrs();
+  }
+  return ret;
 }
 
 static int read_bucket_policy(const DoutPrefixProvider *dpp, 
@@ -6112,8 +6117,9 @@ void RGWCompleteMultipart::execute(optional_yield y)
   if (op_ret < 0)
     return;
 
-  // remove the upload obj
-  int r = meta_obj->delete_object(this, s->obj_ctx, y);
+  // remove the upload meta object ; the meta object is not versioned
+  // when the bucket is, as that would add an unneeded delete marker
+  int r = meta_obj->delete_object(this, s->obj_ctx, y, true /* prevent versioning */);
   if (r >= 0)  {
     /* serializer's exclusive lock is released */
     serializer->clear_locked();
@@ -6127,7 +6133,7 @@ void RGWCompleteMultipart::execute(optional_yield y)
     ldpp_dout(this, 1) << "ERROR: publishing notification failed, with error: " << ret << dendl;
     // too late to rollback operation, hence op_ret is not set here
   }
-}
+} // RGWCompleteMultipart::execute
 
 bool RGWCompleteMultipart::check_previously_completed(const RGWMultiCompleteUpload* parts)
 {
@@ -6264,7 +6270,19 @@ void RGWListMultipart::execute(optional_yield y)
   mp.init(s->object->get_name(), upload_id);
   meta_oid = mp.get_meta();
 
-  op_ret = get_multipart_info(this, s, meta_oid, nullptr);
+  rgw::sal::Attrs attrs;
+  op_ret = get_multipart_info(this, s, meta_oid, nullptr, &attrs);
+  /* decode policy */
+  map<string, bufferlist>::iterator iter = attrs.find(RGW_ATTR_ACL);
+  if (iter != attrs.end()) {
+    auto bliter = iter->second.cbegin();
+    try {
+      policy.decode(bliter);
+    } catch (buffer::error& err) {
+      ldpp_dout(this, 0) << "ERROR: could not decode policy, caught buffer::error" << dendl;
+      op_ret = -EIO;
+    }
+  }
   if (op_ret < 0)
     return;
 
