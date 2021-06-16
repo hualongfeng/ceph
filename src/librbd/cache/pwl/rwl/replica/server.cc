@@ -77,13 +77,36 @@ int main(int argc, const char* argv[]) {
   std::string ip   = replica_addr.substr(0, pos);
   std::string port = replica_addr.substr(pos + 1);
 
+  int r = 0;
   librados::Rados rados;
-  rados.init_with_context(g_ceph_context);
-  rados.connect();
+  librados::IoCtx io_ctx;
+
+  r = rados.init_with_context(g_ceph_context);
+  if (r < 0) {
+    goto cleanup;
+  }
+
+  r = rados.connect();
+  if (r < 0) {
+    std::cerr << "rwl-replica: failed to connect to cluster: " << cpp_strerror(r) << std::endl;
+    goto cleanup;
+  }
+
+  // r = rados.ioctx_create(poolname.c_str(), io_ctx);
+  // if (r < 0) {
+  //   std::cerr << "rwl-replica: failed to access pool " << poolname << ": "
+  //             << cpp_strerror(r) << std::endl;
+  //   goto cleanup;
+  // }
+
   std::cout << "get_instance_id: " << rados.get_instance_id() << std::endl;
   std::cout << "get_instance_id: " << rados.get_instance_id() << std::endl;
 
-  int r = 0;
+  std::cout << "addr: " << g_ceph_context->_conf->rwl_replica_addr << std::endl;
+  std::cout << "size: " << g_ceph_context->_conf->rwl_replica_size << std::endl;
+  std::cout << "path: " << g_ceph_context->_conf->rwl_replica_path << std::endl;
+
+
   try {
     reactor = std::make_shared<Reactor>(g_ceph_context);
     std::shared_ptr<AcceptorHandler> rpma_acceptor = std::make_shared<AcceptorHandler>(g_ceph_context, ip, port, reactor);
