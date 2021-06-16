@@ -13,7 +13,19 @@
 #include "global/global_init.h"
 #include "global/signal_handler.h"
 
-using namespace ceph::librbd::cache::pwl::rwl::replica;
+#include "cls/rbd/cls_rbd_types.h"
+#include "cls/rbd/cls_rbd_client.h"
+#include "cls/rbd/cls_rbd.h"
+#include "librbd/Types.h"
+
+
+#define dout_context g_ceph_context
+#define dout_subsys ceph_subsys_rwl_replica
+#undef dout_prefix
+#define dout_prefix *_dout << "ceph::rwl_repilca::Main: "
+
+using namespace librbd::cache::pwl::rwl::replica;
+using namespace librbd::cls_client;
 
 void usage() {
   std::cout << "usage: ceph-rwl-replica-server [options...]\n";
@@ -80,6 +92,8 @@ int main(int argc, const char* argv[]) {
   int r = 0;
   librados::Rados rados;
   librados::IoCtx io_ctx;
+  std::string poolname = g_conf().get_val<std::string>("rbd_persistent_replicated_cache_cls_pool");
+  cls::rbd::RwlCacheDaemonInfo d_info;
 
   r = rados.init_with_context(g_ceph_context);
   if (r < 0) {
@@ -92,19 +106,30 @@ int main(int argc, const char* argv[]) {
     goto cleanup;
   }
 
-  // r = rados.ioctx_create(poolname.c_str(), io_ctx);
-  // if (r < 0) {
-  //   std::cerr << "rwl-replica: failed to access pool " << poolname << ": "
-  //             << cpp_strerror(r) << std::endl;
-  //   goto cleanup;
-  // }
+  r = rados.ioctx_create(poolname.c_str(), io_ctx);
+  if (r < 0) {
+    std::cerr << "rwl-replica: failed to access pool " << poolname << ": "
+              << cpp_strerror(r) << std::endl;
+    goto cleanup;
+  }
 
-  std::cout << "get_instance_id: " << rados.get_instance_id() << std::endl;
-  std::cout << "get_instance_id: " << rados.get_instance_id() << std::endl;
+  ldout(g_ceph_context, 20) << "addr: " << g_ceph_context->_conf->rwl_replica_addr << dendl;
+  ldout(g_ceph_context, 20) << "size: " << g_ceph_context->_conf->rwl_replica_size << dendl;
+  ldout(g_ceph_context, 20) << "path: " << g_ceph_context->_conf->rwl_replica_path << dendl;
 
-  std::cout << "addr: " << g_ceph_context->_conf->rwl_replica_addr << std::endl;
-  std::cout << "size: " << g_ceph_context->_conf->rwl_replica_size << std::endl;
-  std::cout << "path: " << g_ceph_context->_conf->rwl_replica_path << std::endl;
+  d_info.id = rados.get_instance_id();
+  d_info.rdma_address = ip;
+  d_info.rdma_port = stoi(port, nullptr, 10);
+  d_info.total_size = g_ceph_context->_conf->rwl_replica_size;
+  ldout(g_ceph_context, 20) << "Start:\n"
+                            << "id: " << d_info.id << "\n"
+                            << "rdma_address: " << d_info.rdma_address << "\n"
+                            << "rdma_port: " << d_info.rdma_port << "\n"
+                            << "total_size: " << d_info.total_size << "\n"
+                            << dendl;
+
+  r = rwlcache_daemoninfo(&io_ctx, d_info);
+  std::cout << "rwlcache_daemoninfo: " << r << std::endl;
 
 
   try {

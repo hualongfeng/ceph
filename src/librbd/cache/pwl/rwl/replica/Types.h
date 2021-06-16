@@ -5,7 +5,7 @@
 #include "include/ceph_assert.h"
 #include "include/encoding.h"
 
-namespace ceph::librbd::cache::pwl::rwl::replica {
+namespace librbd::cache::pwl::rwl::replica {
 
 #define MSG_SIZE 4096
 

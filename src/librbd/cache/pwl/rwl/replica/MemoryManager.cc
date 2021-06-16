@@ -15,7 +15,7 @@
 #define dout_prefix *_dout << "ceph::rwl_repilca::MemoryManager " << ": " << this << " " \
                            << __func__ << ": "
 
-namespace ceph::librbd::cache::pwl::rwl::replica {
+namespace librbd::cache::pwl::rwl::replica {
 
 MemoryManager::MemoryManager(CephContext *cct, uint64_t size, std::string path)
   : _size(size), _path(path), _cct(cct) {

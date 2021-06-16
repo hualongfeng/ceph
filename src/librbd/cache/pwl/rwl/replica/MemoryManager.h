@@ -11,7 +11,7 @@
 #include "common/ceph_context.h"
 #include "include/rados/librados.hpp"
 
-namespace ceph::librbd::cache::pwl::rwl::replica {
+namespace librbd::cache::pwl::rwl::replica {
 
 class MemoryManager {
 public:

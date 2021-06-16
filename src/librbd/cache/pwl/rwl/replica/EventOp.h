@@ -13,7 +13,7 @@
 #include "include/rados/librados.hpp"
 #include "common/ceph_context.h"
 
-namespace ceph::librbd::cache::pwl::rwl::replica {
+namespace librbd::cache::pwl::rwl::replica {
 
 struct RpmaPeerDeleter {
   void operator() (struct rpma_peer *peer);

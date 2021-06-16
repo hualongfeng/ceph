@@ -22,7 +22,7 @@
 #define dout_prefix *_dout << "ceph::rwl_repilca::" << this->name() << ": " << this << " " \
                            << __func__ << ": "
 
-namespace ceph::librbd::cache::pwl::rwl::replica {
+namespace librbd::cache::pwl::rwl::replica {
 
 /*
  * common_peer_via_address -- create a new RPMA peer based on ibv_context

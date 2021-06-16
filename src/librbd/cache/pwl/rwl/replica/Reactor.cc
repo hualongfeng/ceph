@@ -15,7 +15,7 @@
 #define dout_prefix *_dout << "ceph::rwl_repilca::Reactor: " << this << " " \
                            << __func__ << ": "
 
-namespace ceph::librbd::cache::pwl::rwl::replica {
+namespace librbd::cache::pwl::rwl::replica {
 
 Reactor::Reactor(CephContext *cct) : _stop(false), _cct(cct) {
   ldout(_cct, 20) << dendl;

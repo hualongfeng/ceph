@@ -17,6 +17,8 @@ target_link_libraries(ceph-rwl-replica-server
   ceph-common
   pmem::pmem
   rpma
+  cls_rbd_client
+  libneorados
   )
 install(TARGETS ceph-rwl-replica-server DESTINATION bin)
 
@@ -28,6 +30,8 @@ target_link_libraries(ceph-rwl-replica-client
   ceph-common
   pmem::pmem
   rpma
+  cls_rbd_client
+  libneorados
   )
 install(TARGETS ceph-rwl-replica-client DESTINATION bin)
 

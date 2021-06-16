@@ -17,7 +17,13 @@
 #include "global/global_init.h"
 #include "global/signal_handler.h"
 
-using namespace ceph::librbd::cache::pwl::rwl::replica;
+#include "cls/rbd/cls_rbd_types.h"
+#include "cls/rbd/cls_rbd_client.h"
+#include "cls/rbd/cls_rbd.h"
+#include "librbd/Types.h"
+
+using namespace librbd::cache::pwl::rwl::replica;
+using namespace librbd::cls_client;
 
 void usage() {
   std::cout << "usage: ceph-rwl-replica-server [options...]\n";
@@ -74,6 +80,36 @@ int main(int argc, const char* argv[]) {
   /* configure logging thresholds to see more details */
   rpma_log_set_threshold(RPMA_LOG_THRESHOLD, RPMA_LOG_LEVEL_INFO);
   rpma_log_set_threshold(RPMA_LOG_THRESHOLD_AUX, RPMA_LOG_LEVEL_INFO);
+
+
+  // int r = 0;
+  // librados::Rados rados;
+  // librados::IoCtx io_ctx;
+  // std::string poolname = g_conf().get_val<std::string>("rbd_persistent_replicated_cache_cls_pool");
+  // cls::rbd::RwlCacheDaemonInfo d_info;
+
+  // r = rados.init_with_context(g_ceph_context);
+  // if (r < 0) {
+  //   return -r;
+  // }
+
+  // r = rados.connect();
+  // if (r < 0) {
+  //   std::cerr << "rwl-replica: failed to connect to cluster: " << cpp_strerror(r) << std::endl;
+  //   return -r;
+  // }
+
+  // r = rados.ioctx_create(poolname.c_str(), io_ctx);
+  // if (r < 0) {
+  //   std::cerr << "rwl-replica: failed to access pool " << poolname << ": "
+  //             << cpp_strerror(r) << std::endl;
+  //   return -r;
+  // }
+
+  // cls::rbd::RwlCacheRequest req = {
+  //   rados.get_instance_id();
+  // };
+
 
   std::string replica_addr = g_conf().get_val<std::string>("rwl_replica_addr");
   auto pos         = replica_addr.find(":");
