@@ -3,6 +3,7 @@
 #include <string>
 #include <thread>
 #include <fstream>
+#include <vector>
 
 #include "Reactor.h"
 #include "EventHandler.h"
@@ -135,6 +136,29 @@ int main(int argc, const char* argv[]) {
               << std::endl;
   }
 
+
+  std::shared_ptr<ClientHandler> rpma_client;
+  using ClientHandlerPtr = std::shared_ptr<ClientHandler>;
+  std::vector<ClientHandlerPtr> clients;
+
+  int ret = 0;
+
+  try {
+    reactor = std::make_shared<Reactor>(g_ceph_context);
+    for (auto &daemon : info.daemons) {
+      std::string ip = daemon.rdma_address;
+      std::string port = std::to_string(daemon.rdma_port);
+      rpma_client = std::make_shared<ClientHandler>(g_ceph_context, ip, port, reactor);
+      if ((ret = rpma_client->register_self())) {
+        std::cout << "ret :" << ret << std::endl;
+        return ret;
+      }
+      clients.push_back(rpma_client);
+    }
+  } catch (std::runtime_error &e) {
+    std::cout << __FILE__ << ":" << __LINE__ << " Runtime error: " << e.what() << std::endl;
+  }
+
   cls::rbd::RwlCacheRequestAck ack = {cache_id, 0};
   r = rwlcache_request_ack(&io_ctx, ack);
   if (r != 0) {
@@ -142,49 +166,24 @@ int main(int argc, const char* argv[]) {
     return -r;
   }
 
-  cls::rbd::RwlCacheFree free = {cache_id};
-  r = rwlcache_free(&io_ctx, free);
-  if (r != 0) {
-    std::cout << "rwlcache_free: " << r << cpp_strerror(r) << std::endl;
-    return -r;
-  }
-
-
-  std::string replica_addr = g_conf().get_val<std::string>("rwl_replica_addr");
-  auto pos         = replica_addr.find(":");
-  std::string ip   = replica_addr.substr(0, pos);
-  std::string port = replica_addr.substr(pos + 1);
-
-  std::string basename("temporary");
-  // std::shared_ptr<Reactor> reactor;
-  std::shared_ptr<ClientHandler> rpma_client;
-
-  int ret = 0;
-
-  try {
-    reactor = std::make_shared<Reactor>(g_ceph_context);
-    rpma_client = std::make_shared<ClientHandler>(g_ceph_context, ip, port, reactor);
-    if ((ret = rpma_client->register_self())) {
-      std::cout << "ret :" << ret << std::endl;
-      return ret;
-    }
-  } catch (std::runtime_error &e) {
-    std::cout << __FILE__ << ":" << __LINE__ << " Runtime error: " << e.what() << std::endl;
-  }
-
   std::thread th1([]{
       while (reactor) {
         reactor->handle_events();
-        if (reactor->empty()) {
-          std::cout << "My event_table is empty!!!" << std::endl;
-          break;
-        }
       }
+      std::cout << "stoped to handle events" << std::endl;
   });
+  //  th1.join();
+  th1.detach();
 
-  rpma_client->wait_established();
+  for (auto &client : clients) {
+    client->wait_established();
+  }
+  // rpma_client->wait_established();
 
-  std::cout << "init_replica: " << rpma_client->init_replica(1, REQUIRE_SIZE, "RBD", "test") << std::endl;
+  for (auto &client : clients) {
+    // std::cout << "init_replica: " << rpma_client->init_replica(1, REQUIRE_SIZE, "RBD", "test") << std::endl;
+    std::cout << "init_replica: " << client->init_replica(1, REQUIRE_SIZE, "RBD", "test") << std::endl;
+  }
   std::cout << "-------------------------------------" << std::endl;
 
   // data prepare
@@ -199,14 +198,24 @@ int main(int argc, const char* argv[]) {
   for(size_t i = 0; i < mr_size; i+=data_size) {
     memcpy((char*)mr_ptr + i, data, data_size);
   }
-  std::cout << "-------------------------------------" << std::endl;
+  std::cout << "---------------set_head----------------------" << std::endl;
 
-  rpma_client->set_head(mr_ptr, mr_size);
-  std::atomic<bool> completed{false};
-  rpma_client->write(0, mr_size, [&completed]{
-    completed = true;
-  });
-  while(completed == false);
+  for (auto &client : clients) {
+    // rpma_client->set_head(mr_ptr, mr_size);
+    client->set_head(mr_ptr, mr_size);
+  }
+
+
+  std::cout << "----------------write---------------------" << std::endl;
+
+  for (auto &client : clients) {
+    std::atomic<bool> completed{false};
+    // rpma_client->write(0, mr_size, [&completed]{
+    client->write(0, mr_size, [&completed]{
+      completed = true;
+    });
+    while(completed == false);
+  }
 
   std::cout << "-------------------------------------" << std::endl;
   std::string line;
@@ -220,12 +229,15 @@ int main(int argc, const char* argv[]) {
   }
   std::cout << std::endl;
 
-  completed = false;
-  std::cout << "-------------------------------------" << std::endl;
-  rpma_client->flush(0, mr_size, [&completed]{
-    completed = true;
-  });
-  while(completed == false);
+  std::cout << "---------------flush----------------------" << std::endl;
+  for (auto &client : clients) {
+    std::atomic<bool> completed{false};
+    // rpma_client->flush(0, mr_size, [&completed]{
+    client->flush(0, mr_size, [&completed]{
+      completed = true;
+    });
+    while(completed == false);
+  }
 
   myfile.open("/mnt/pmem/rbd-pwl.RBD.test.pool.1");
   if (myfile.is_open()) {
@@ -238,16 +250,29 @@ int main(int argc, const char* argv[]) {
   std::cout << std::endl;
 
 
-  std::cout << "-------------------------------------" << std::endl;
+  std::cout << "----------------close_replica---------------------" << std::endl;
 
+  for (auto &client : clients) {
   // std::cout << "close_replica: " << rpma_client->close_replica() << std::endl;
-  std::cout << "-------------------------------------" << std::endl;
+    std::cout << "close_replica: " << client->close_replica() << std::endl;
+  }
+  std::cout << "------------------disconnect-------------------" << std::endl;
 
-  std::cout << "close: "  << rpma_client->disconnect() << std::endl;
-  std::cout << "-------------------------------------" << std::endl;
+  for (auto &client : clients) {
+    // std::cout << "close: "  << rpma_client->disconnect() << std::endl;
+    std::cout << "close: "  << client->disconnect() << std::endl;
+  }
+  std::cout << "-------------cachefree------------------------" << std::endl;
 
 
-  th1.join();
+  cls::rbd::RwlCacheFree free = {cache_id};
+  r = rwlcache_free(&io_ctx, free);
+  if (r != 0) {
+    std::cout << "rwlcache_free: " << r << cpp_strerror(r) << std::endl;
+    return -r;
+  }
+
+  std::cout << "-------------cleanup------------------------" << std::endl;
 
 //  cleanup:
   reactor.reset();
