@@ -3,6 +3,7 @@ set(ceph_rwl_replica_files
   MemoryManager.cc
   Reactor.cc
   Types.cc
+  ReplicaClient.cc
   )
 
 add_library(ceph_rwl_replica_lib STATIC ${ceph_rwl_replica_files})
