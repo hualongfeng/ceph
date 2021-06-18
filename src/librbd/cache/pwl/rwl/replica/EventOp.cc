@@ -58,7 +58,7 @@ RpmaConn::~RpmaConn() {
   if (conn == nullptr) {
     return ;
   }
-  if (!disconnected) {
+  if (!disconnected.load()) {
     rpma_conn_disconnect(conn);
   }
   rpma_conn_delete(&conn);
@@ -75,8 +75,11 @@ struct rpma_conn* RpmaConn::get() {
 }
 
 int RpmaConn::disconnect() {
-  disconnected = true;
-  return rpma_conn_disconnect(conn);
+  if (!disconnected.load()) {
+    disconnected.store(true);
+    return rpma_conn_disconnect(conn);
+  }
+  return 0;
 }
 
 AcceptorHandler::AcceptorHandler(CephContext *cct,
