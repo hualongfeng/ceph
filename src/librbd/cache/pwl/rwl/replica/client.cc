@@ -115,15 +115,15 @@ int main(int argc, const char* argv[]) {
   replica_client.set_head(mr_ptr, mr_size);
 
   std::cout << "---------------write-----------------------------" << std::endl;
-  replica_client.write(0, mr_size);
+  std::cout << (r = replica_client.write(0, mr_size)) << std::endl;
   std::cout << "---------------flush-----------------------------" << std::endl;
-  replica_client.flush(0, mr_size);
+  r == 0 && std::cout << (r = replica_client.flush(0, mr_size)) << std::endl;
   std::cout << "---------------close_replica---------------------" << std::endl;
   // replica_client.replica_close();
   std::cout << "---------------disconnect------------------------" << std::endl;
   replica_client.disconnect();
   std::cout << "---------------cachefree-------------------------" << std::endl;
-  replica_client.disconnect();
+  std::cout << replica_client.cache_free() << std::endl;
   std::cout << "---------------cleanup---------------------------" << std::endl;
 
 //  cleanup:

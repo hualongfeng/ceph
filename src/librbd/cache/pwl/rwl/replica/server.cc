@@ -5,6 +5,7 @@
 #include "Reactor.h"
 #include "EventHandler.h"
 #include "EventOp.h"
+#include "TimerPing.h"
 
 #include "common/ceph_argparse.h"
 #include "common/config.h"
@@ -94,6 +95,7 @@ int main(int argc, const char* argv[]) {
   librados::IoCtx io_ctx;
   std::string poolname = g_conf().get_val<std::string>("rbd_persistent_replicated_cache_cls_pool");
   cls::rbd::RwlCacheDaemonInfo d_info;
+  std::shared_ptr<DaemonPing> dp = std::make_shared<DaemonPing>(g_ceph_context, rados, io_ctx);
 
   r = rados.init_with_context(g_ceph_context);
   if (r < 0) {
@@ -138,6 +140,8 @@ int main(int argc, const char* argv[]) {
     if ((r = rpma_acceptor->register_self())) {
       goto cleanup;
     }
+    dp->init(reactor);
+    dp->timer_ping();
     reactor->handle_events();
   } catch (std::runtime_error &e) {
     std::cout << __FILE__ << ":" << __LINE__ << " Runtime error: " << e.what() << std::endl;
@@ -145,6 +149,7 @@ int main(int argc, const char* argv[]) {
 
  cleanup:
   reactor.reset();
+  rados.shutdown();
   unregister_async_signal_handler(SIGHUP, sighup_handler);
   unregister_async_signal_handler(SIGINT, handle_signal);
   unregister_async_signal_handler(SIGTERM, handle_signal);
