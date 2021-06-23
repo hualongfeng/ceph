@@ -337,6 +337,21 @@ int ConnectionHandler::handle_completion() {
   return ret;
 }
 
+int ConnectionHandler::wait_established() {
+  std::cout << "I'm in wait_established()" << std::endl;
+  double cost_time;
+  auto start = clock::now();
+  while(connected.load() == false && cost_time < 10e6) { // cost_time < 1s
+    std::this_thread::yield();
+    auto end = clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    cost_time = duration.count();
+  }
+  ldout(_cct, 10) << "cost time: " << cost_time << dendl;
+
+  return connected.load() == true ? 0 : -1;
+}
+
 int ConnectionHandler::send(std::function<void()> callback) {
   int ret = 0;
   std::unique_ptr<RpmaSend> usend = std::make_unique<RpmaSend>(callback);
