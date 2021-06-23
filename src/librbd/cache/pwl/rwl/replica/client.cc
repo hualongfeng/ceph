@@ -75,7 +75,7 @@ int main(int argc, const char* argv[]) {
   rpma_log_set_threshold(RPMA_LOG_THRESHOLD_AUX, RPMA_LOG_LEVEL_INFO);
 
   int r = 0;
-  ReplicaClient replica_client(g_ceph_context, REQUIRE_SIZE, 3);
+  ReplicaClient replica_client(g_ceph_context, REQUIRE_SIZE, 3, "RBD", "test");
   r = replica_client.init_rados();
   if (r < 0) {
     std::cerr << "rwl-replica: failed to connect to cluster: " << cpp_strerror(r) << std::endl;
@@ -91,10 +91,6 @@ int main(int argc, const char* argv[]) {
   if (r != 0) {
     std::cout << "cache_request: " << r << cpp_strerror(r) << std::endl;
     return -r;
-  }
-  r = replica_client.replica_init("RBD", "test");
-  if (r != 0) {
-    std::cout << "replica init failed: " << r << std::endl;
   }
 
   std::cout << "---------------data prepare----------------------" << std::endl;
@@ -119,7 +115,7 @@ int main(int argc, const char* argv[]) {
   std::cout << "---------------flush-----------------------------" << std::endl;
   r == 0 && std::cout << (r = replica_client.flush(0, mr_size)) << std::endl;
   std::cout << "---------------close_replica---------------------" << std::endl;
-  // replica_client.replica_close();
+  replica_client.replica_close();
   std::cout << "---------------disconnect------------------------" << std::endl;
   replica_client.disconnect();
   std::cout << "---------------cachefree-------------------------" << std::endl;

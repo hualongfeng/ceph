@@ -108,15 +108,15 @@ public:
   int handle_connection_event();
 
   // wait for the connection to establish
-  void wait_established() {
-    std::cout << "I'm in wait_established()" << std::endl;
-    while (connected.load() != true);
-  }
+  int wait_established();
 
   int send(std::function<void()> callback);
   int recv(std::function<void()> callback);
   virtual const char* name() const override { return "ConnectionHandler"; }
+  bool connecting() {return connected.load();}
 protected:
+  using clock = ceph::coarse_mono_clock;
+  using time = ceph::coarse_mono_time;
   // Notice: call this function after peer is initialized.
   void init_send_recv_buffer();
   // Notice: call this function after conn is initialized.
@@ -189,8 +189,7 @@ public:
   int set_head(void *head_ptr, uint64_t size);
   virtual const char* name() const override { return "ClientHandler"; }
 private:
-  using clock = ceph::coarse_mono_clock;
-  using time = ceph::coarse_mono_time;
+
   enum rpma_flush_type _flush_type;
   std::string _address;
   std::string _port;

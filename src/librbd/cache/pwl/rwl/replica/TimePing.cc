@@ -124,14 +124,19 @@ int DaemonPing::get_cache_info_from_filename(std::string filename, struct RwlCac
 
 void DaemonPing::update_cacheinfos() {
   std::string path = _cct->_conf->rwl_replica_path;
-  RwlCacheInfo info;
-  //for (auto& p : fs::recursive_directory_iterator(".")) {           
-  for (auto& p : fs::directory_iterator(path)) {           
+
+  std::unordered_map<epoch_t, RwlCacheInfo> old_infos;
+  old_infos.swap(infos);
+  for (auto& p : fs::directory_iterator(path)) {
+    RwlCacheInfo info;
     if (fs::is_regular_file(p.status())
-        && !get_cache_info_from_filename(p.path(), info)
-        && infos.count(info.cache_id) == 0) {
+        && !get_cache_info_from_filename(p.path(), info)) {
       infos.emplace(info.cache_id, std::move(info));
+      old_infos.erase(info.cache_id);
     }
+  }
+  for (auto& info : old_infos) {
+    freed_caches.insert(info.first);
   }
 }
 

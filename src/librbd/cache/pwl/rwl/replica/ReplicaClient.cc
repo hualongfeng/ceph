@@ -73,29 +73,28 @@ int ReplicaClient::replica_close() {
   ldout(_cct, 20) << dendl;
   int r = 0;
   for (auto &daemon : _daemons) {
-    if (!daemon.client_handler) continue;
-    if (_need_free_daemons.count(daemon.id) == 0) continue;
+    if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
+    if (_need_free_daemons.count(daemon.id) == 0) continue;  // part alloc failed, so need to free that successful part
     r = daemon.client_handler->close_replica();
-    if (r < 0) {
-      return r;
+    if (r == 0) {
+      _need_free_daemons.erase(daemon.id);  // only close successfully to erase
     }
-    _need_free_daemons.erase(daemon.id);
   }
   return 0;
 }
 
-int ReplicaClient::replica_init(std::string pool_name, std::string image_name) {
-  ldout(_cct, 10) << "pool_name: " << pool_name << "\n"
-                  << "image_name: " << image_name << "\n" 
+int ReplicaClient::replica_init() {
+  ldout(_cct, 10) << "pool_name: " << _pool_name << "\n"
+                  << "image_name: " << _image_name << "\n"
                   << dendl;
   int r = 0;
   for (auto &daemon : _daemons) {
     if (!daemon.client_handler) continue;
-    r = daemon.client_handler->init_replica(_cache_id, _size, pool_name, image_name);
+    _need_free_daemons.insert(daemon.id); //maybe it create cachefile in replica daemon, but reply failed
+    r = daemon.client_handler->init_replica(_cache_id, _size, _pool_name, _image_name);
     if (r < 0) {
       return r;
     }
-    _need_free_daemons.insert(daemon.id);
   }
   return 0;
 }
@@ -169,7 +168,7 @@ int ReplicaClient::cache_request() {
   r = rwlcache_get_cacheinfo(&io_ctx, _cache_id, info);
   if (r < 0) {
     ldout(_cct, 1) << "rwlcache_get_cacheinfo: " << r << cpp_strerror(r) << dendl;
-    return r;
+    ceph_assert(r == 0);
   }
 
   ceph_assert(info.cache_id == _cache_id);
@@ -188,13 +187,13 @@ int ReplicaClient::cache_request() {
     try {
       daemon.client_handler = std::make_shared<ClientHandler>(_cct, daemon.rdma_ip, daemon.rdma_port, _reactor);
 
-      if ((r = daemon.client_handler->register_self())) {
-        return r;
-      }
+      r = daemon.client_handler->register_self();
+      ceph_assert(r == 0);
     } catch (std::runtime_error &e) {
       ldout(_cct, 1) << "Runtione error: " << e.what() << dendl;
       disconnect();
-      return -1;
+      r = -1; // indicate this connection error
+      goto request_ack;
     }
   }
 
@@ -209,13 +208,27 @@ int ReplicaClient::cache_request() {
     // so that it will finish in some times even though
     // it will not be success
     // it should a value to indicate whether it is success
-    daemon.client_handler->wait_established();
+    //TODO:
+    r = daemon.client_handler->wait_established();
+    if (r < 0) {
+      // if there has connection failed, all should be stopped.
+      disconnect();
+      break;
+    }
   }
 
+  if (r == 0) {
+    if ((r = replica_init()) != 0) {
+      // allocate cachefile failed in some remote daemon
+      replica_close();
+    }
+  }
+
+request_ack:
   // if the connection failed, what do we do after?
   // Or it will be blocked on waiting established.
   // TODO: there should have success and failed
-  cls::rbd::RwlCacheRequestAck ack{_cache_id, 0};
+  cls::rbd::RwlCacheRequestAck ack{_cache_id, r, _need_free_daemons};
   r = rwlcache_request_ack(&io_ctx, ack);
   if (r < 0) {
     ldout(_cct, 1) << "rwlcache_request_ack: " << r << cpp_strerror(r) << dendl;

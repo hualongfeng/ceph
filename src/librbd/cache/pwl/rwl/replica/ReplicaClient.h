@@ -23,6 +23,9 @@ class ReplicaClient {
 
   epoch_t _cache_id;
 
+  std::string _pool_name;
+  std::string _image_name;
+
   using ClientHandlerPtr = std::shared_ptr<ClientHandler>;
   using ReactorPtr = std::shared_ptr<Reactor>;
   struct DaemonInfo {
@@ -41,8 +44,8 @@ class ReplicaClient {
   ReactorPtr _reactor;
 
 public:
-  ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies) 
-    : _size(size), _copies(copies), _cct(cct), 
+  ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name)
+    : _size(size), _copies(copies), _pool_name(std::move(pool_name)), _image_name(std::move(image_name)), _cct(cct),
       _reactor(std::make_shared<Reactor>(cct)) {}
   ~ReplicaClient(){}
 
@@ -52,7 +55,7 @@ public:
   int cache_free();
   void disconnect();
   int set_head(void *head_ptr, uint64_t size);
-  int replica_init(std::string pool_name, std::string image_name);
+  int replica_init();
   int replica_close();
   int write(size_t offset, size_t len);
   int flush(size_t offset, size_t len);

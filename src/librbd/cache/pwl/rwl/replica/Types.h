@@ -18,6 +18,7 @@ namespace librbd::cache::pwl::rwl::replica {
 
 #define TIMEOUT_15S   (15000) /* [msec] == 15s */
 #define TIMEOUT_1500S (1500000) /* [msec] == 1500s */
+#define CONNECTION_TIMEOUT (1)  //1s
 
 
 
