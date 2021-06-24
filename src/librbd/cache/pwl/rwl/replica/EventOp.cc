@@ -444,83 +444,59 @@ RPMAHandler::~RPMAHandler() {
   ldout(_cct, 20) << dendl;
 }
 
-int RPMAHandler::register_mr_to_descriptor(enum rpma_op op) {
+int RPMAHandler::register_mr_to_descriptor(RwlReplicaInitRequestReply& init_reply) {
   int ret = 0;
 
-  int usage = 0;
-  switch (op) {
-    case RPMA_OP_FLUSH:
-      usage |= (data_manager.is_pmem() ? RPMA_MR_USAGE_FLUSH_TYPE_PERSISTENT : RPMA_MR_USAGE_FLUSH_TYPE_VISIBILITY);
-      // don't have break
-    case RPMA_OP_WRITE:
-      usage |= RPMA_MR_USAGE_WRITE_DST;
-      break;
-    case RPMA_OP_READ:
-      usage |= RPMA_MR_USAGE_READ_SRC;
-//  break;
-//  don't resolve read operation
-    default:
-      ldout(_cct, 1) << "Warn: Don't step in this." << dendl;
-      return -1;
-  }
+  int usage = RPMA_MR_USAGE_FLUSH_TYPE_PERSISTENT | RPMA_MR_USAGE_WRITE_DST;
 
-  /* register the memory */
+  // register the memory
   rpma_mr_local *mr{nullptr};
   if ((ret = rpma_mr_reg(_peer.get(), data_manager.get_pointer(), data_manager.size(),
                        usage, &mr))) {
     ldout(_cct, 1) << rpma_err_2str(ret) << dendl;
+    init_reply.type = RWL_REPLICA_INIT_FAILED;
     return ret;
   }
   data_mr.reset(mr);
 
-  /* get size of the memory region's descriptor */
+  // get size of the memory region's descriptor
   size_t mr_desc_size;
   ret = rpma_mr_get_descriptor_size(mr, &mr_desc_size);
 
-  /* calculate data for the client write */
-  RwlReplicaInitRequestReply init_reply(RWL_REPLICA_INIT_SUCCESSED);
-  init_reply.desc.mr_desc_size = mr_desc_size;
-  init_reply.desc.descriptors.resize(mr_desc_size);
+  // resources - memory region
+  struct rpma_peer_cfg *pcfg = NULL;
 
-  /* get the memory region's descriptor */
+  // create a peer configuration structure
+  ret = rpma_peer_cfg_new(&pcfg);
+
+  // configure peer's direct write to pmem support
+  ret = rpma_peer_cfg_set_direct_write_to_pmem(pcfg, true);
+  if (ret) {
+    (void) rpma_peer_cfg_delete(&pcfg);
+    ldout(_cct, 1) << "rpma_peer_cfg_set_direct_write_to_pmem failed: " << rpma_err_2str(ret) << dendl;
+    init_reply.type = RWL_REPLICA_INIT_FAILED;
+    return ret;
+  }
+
+  // get size of the peer config descriptor
+  size_t pcfg_desc_size;
+  ret = rpma_peer_cfg_get_descriptor_size(pcfg, &pcfg_desc_size);
+
+  // calculate data descriptor size for the client write
+  init_reply.desc.mr_desc_size = mr_desc_size;
+  init_reply.desc.pcfg_desc_size = pcfg_desc_size;
+  init_reply.desc.descriptors.resize(mr_desc_size + pcfg_desc_size);
+
+  // get the memory region's descriptor
   rpma_mr_get_descriptor(data_mr.get(), &init_reply.desc.descriptors[0]);
 
-  if (op == RPMA_OP_FLUSH) {
-    /* resources - memory region */
-    struct rpma_peer_cfg *pcfg = NULL;
+  // Get the peer's configuration descriptor.
+  // The pcfg_desc descriptor is saved in the `descriptors`
+  // just after the mr_desc descriptor.
+  rpma_peer_cfg_get_descriptor(pcfg, &init_reply.desc.descriptors[mr_desc_size]);
 
-    /* create a peer configuration structure */
-    ret = rpma_peer_cfg_new(&pcfg);
+  rpma_peer_cfg_delete(&pcfg);
 
-    if (data_manager.is_pmem()) {
-      /* configure peer's direct write to pmem support */
-      ret = rpma_peer_cfg_set_direct_write_to_pmem(pcfg, true);
-      if (ret) {
-        (void) rpma_peer_cfg_delete(&pcfg);
-        ldout(_cct, 1) << "rpma_peer_cfg_set_direct_write_to_pmem failed: " << rpma_err_2str(ret) << dendl;
-        return ret;
-      }
-    }
-
-    /* get size of the peer config descriptor */
-    size_t pcfg_desc_size;
-    ret = rpma_peer_cfg_get_descriptor_size(pcfg, &pcfg_desc_size);
-    init_reply.desc.pcfg_desc_size = pcfg_desc_size;
-    init_reply.desc.descriptors.resize(mr_desc_size + pcfg_desc_size);
-
-    /*
-    * Get the peer's configuration descriptor.
-    * The pcfg_desc descriptor is saved in the `descriptors[]` array
-    * just after the mr_desc descriptor.
-    */
-    rpma_peer_cfg_get_descriptor(pcfg, &init_reply.desc.descriptors[mr_desc_size]);
-
-    rpma_peer_cfg_delete(&pcfg);
-  }
-  bufferlist bl;
-  init_reply.encode(bl);
-  assert(bl.length() < MSG_SIZE);
-  memcpy(send_bl.c_str(), bl.c_str(), bl.length());
   return 0;
 }
 
@@ -538,7 +514,23 @@ int RPMAHandler::get_descriptor_for_write() {
   if (data_manager.get_pointer() == nullptr) {
     data_manager.init(init.info.cache_size, _cct->_conf->rwl_replica_path + "/" + cachefile_name);
   }
-  return register_mr_to_descriptor(RPMA_OP_FLUSH);
+
+  RwlReplicaInitRequestReply init_reply(RWL_REPLICA_INIT_SUCCESSED);
+  if (!data_manager.is_pmem()) {
+    init_reply.type = RWL_REPLICA_INIT_FAILED;
+  } else {
+    register_mr_to_descriptor(init_reply);
+  }
+
+  ldout(_cct, 20) << "succeed to register: "
+                  << init_reply.type
+                  << dendl;
+
+  bufferlist bl;
+  init_reply.encode(bl);
+  assert(bl.length() < MSG_SIZE);
+  memcpy(send_bl.c_str(), bl.c_str(), bl.length());
+  return 0;
 }
 
 int RPMAHandler::close() {
@@ -555,42 +547,40 @@ int RPMAHandler::close() {
   reply.encode(bl);
   assert(bl.length() < MSG_SIZE);
   memcpy(send_bl.c_str(), bl.c_str(), bl.length());
-  send(nullptr);
   return 0;
 }
 
-int RPMAHandler::get_descriptor() {
+void RPMAHandler::deal_require() {
   RwlReplicaRequest request;
   auto it = recv_bl.cbegin();
   request.decode(it);
   switch (request.type) {
     case RWL_REPLICA_INIT_REQUEST:
-      return get_descriptor_for_write();
+      get_descriptor_for_write();
+      break;
     case RWL_REPLICA_FINISHED_REQUEST:
-      return close();
+      close();
+      break;
     default:
       ldout(_cct, 1) << "the operation isn't supported now. op: "
                      << request.type
                      << dendl;
   }
-  return -1;
-}
 
-void RPMAHandler::deal_require() {
-  get_descriptor();
-  //TODO: When it meet the close operation, don't do the recv operation
+  //When it meet the close operation, don't do the recv operation
   /* prepare a receive for the client's response */
-  std::unique_ptr<RpmaRecv> rec = std::make_unique<RpmaRecv>([self=this](){
-    self->deal_require();
-  });
-  int ret = (*rec)(_conn.get(), recv_mr.get(), 0, MSG_SIZE, rec.get());
-  if (ret == 0) {
-    callback_table.insert(rec.get());
-    rec.release();
+  if (request.type != RWL_REPLICA_FINISHED_REQUEST) {
+    std::unique_ptr<RpmaRecv> rec = std::make_unique<RpmaRecv>([self=this](){
+      self->deal_require();
+    });
+    int ret = (*rec)(_conn.get(), recv_mr.get(), 0, MSG_SIZE, rec.get());
+    if (ret == 0) {
+      callback_table.insert(rec.get());
+      rec.release();
+    }
   }
-
-  /* send the common_data to the client */
-  rpma_send(_conn.get(), send_mr.get(), 0, MSG_SIZE,RPMA_F_COMPLETION_ALWAYS, nullptr);
+  /* send the data to the client */
+  send(nullptr);
 }
 
 
@@ -745,7 +735,7 @@ int ClientHandler::init_replica(epoch_t cache_id, uint64_t cache_size, std::stri
     cost_time = duration.count();
   }
   ldout(_cct, 10) << "cost time: " << cost_time << dendl;
-  return (completed == true ? 0 : -1);
+  return (completed == true ? (_image_mr == nullptr ? -28 : 0) : -1);
 }
 
 int ClientHandler::close_replica() {

@@ -24,13 +24,6 @@ MemoryManager::MemoryManager(CephContext *cct, uint64_t size, std::string path)
   _data = get_memory_from_pmem(path);
   if (_data != nullptr) {
     _is_pmem = true;
-    return;
-  }
-
-  _is_pmem = false;
-  _data = get_memory_from_dram();
-  if (_data == nullptr) {
-    throw std::runtime_error("memory malloc failed");
   }
 }
 
@@ -41,12 +34,6 @@ void MemoryManager::init(uint64_t size, std::string path) {
   _data = get_memory_from_pmem(_path);
   if (_data != nullptr) {
     _is_pmem = true;
-    return;
-  }
-  _is_pmem = false;
-  _data = get_memory_from_dram();
-  if (_data == nullptr) {
-    throw std::runtime_error("memory malloc failed");
   }
 }
 
@@ -99,12 +86,6 @@ void* MemoryManager::get_memory_from_pmem(std::string &path) {
       _data = nullptr;
     }
   }
-  return _data;
-}
-
-void* MemoryManager::get_memory_from_dram() {
-  _data = malloc(_size);
-
   return _data;
 }
 

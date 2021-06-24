@@ -25,7 +25,6 @@ public:
   int close_and_remove();
 private:
   void *get_memory_from_pmem(std::string &path);
-  void *get_memory_from_dram();
 
   void *_data{nullptr};
   uint64_t _size;

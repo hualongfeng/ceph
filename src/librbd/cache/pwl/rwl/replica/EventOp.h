@@ -37,6 +37,8 @@ class RpmaConn {
 public:
   RpmaConn(struct rpma_conn *conn): conn(conn), disconnected(false) {}
   RpmaConn() : conn(nullptr), disconnected(true) {}
+  RpmaConn(const RpmaConn &) = delete;
+  RpmaConn& operator=(const RpmaConn &) = delete;
   ~RpmaConn();
 
   void reset(struct rpma_conn *conn);
@@ -150,9 +152,8 @@ public:
   virtual int remove_self() override;
   virtual const char* name() const override { return "RPMAHandler"; }
 private:
-  int register_mr_to_descriptor(enum rpma_op op);
+  int register_mr_to_descriptor(RwlReplicaInitRequestReply& init_reply);
   int get_descriptor_for_write();
-  int get_descriptor();
   void deal_require();
   int close();
 
@@ -170,6 +171,8 @@ public:
                 const std::weak_ptr<Reactor> reactor_manager);
 
   ~ClientHandler();
+  ClientHandler(const ClientHandler &) = delete;
+  ClientHandler& operator=(const ClientHandler &) = delete;
   virtual int register_self() override;
   virtual int remove_self() override;
 
@@ -198,7 +201,7 @@ private:
   void *data_header;
   unique_rpma_mr_ptr data_mr;
   size_t _image_size;
-  struct rpma_mr_remote* _image_mr;
+  struct rpma_mr_remote* _image_mr{nullptr};
   std::string _image_name;
 };
 
