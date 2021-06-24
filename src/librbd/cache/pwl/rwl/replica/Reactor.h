@@ -11,6 +11,8 @@ namespace librbd::cache::pwl::rwl::replica {
 class Reactor {
 public:
   Reactor(CephContext *cct);
+  Reactor(const Reactor &) = delete;
+  Reactor& operator=(const Reactor &) = delete;
   ~Reactor();
 
   // Register an EventHandler of a particular EventType.

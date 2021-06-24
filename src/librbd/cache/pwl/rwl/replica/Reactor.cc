@@ -89,12 +89,12 @@ int Reactor::remove_handler(EventHandlerPtr eh, EventType et) {
 
 void Reactor::shutdown() {
   ldout(_cct, 20) << dendl;
+  _stop = true;
   for (auto &it : _event_table) {
     Handle fd = it.first;
     epoll_ctl(_epoll, EPOLL_CTL_DEL, fd, NULL);
   }
   _event_table.clear();
-  _stop = true;
 }
 
 
