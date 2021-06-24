@@ -30,12 +30,9 @@ void usage() {
   generic_server_usage();
 }
 
-std::shared_ptr<Reactor> reactor;
+// std::shared_ptr<Reactor> reactor;
 
 static void handle_signal(int signum) {
-  if (reactor) {
-    reactor->shutdown();
-  }
   return ;
 }
 
@@ -107,23 +104,26 @@ int main(int argc, const char* argv[]) {
   for(size_t i = 0; i < mr_size; i+=data_size) {
     memcpy((char*)mr_ptr + i, data, data_size);
   }
-  std::cout << "---------------set_head--------------------------" << std::endl;
-  replica_client.set_head(mr_ptr, mr_size);
+  r == 0 && std::cout << "---------------set_head--------------------------" << std::endl;
+  r == 0 && replica_client.set_head(mr_ptr, mr_size);
 
-  std::cout << "---------------write-----------------------------" << std::endl;
-  std::cout << (r = replica_client.write(0, mr_size)) << std::endl;
-  std::cout << "---------------flush-----------------------------" << std::endl;
+  r == 0 && std::cout << "---------------write-----------------------------" << std::endl;
+  r == 0 && std::cout << (r = replica_client.write(0, mr_size)) << std::endl;
+  r == 0 && std::cout << "---------------flush-----------------------------" << std::endl;
   r == 0 && std::cout << (r = replica_client.flush(0, mr_size)) << std::endl;
-  std::cout << "---------------close_replica---------------------" << std::endl;
-  replica_client.replica_close();
-  std::cout << "---------------disconnect------------------------" << std::endl;
+  r == 0 && std::cout << "---------------close_replica---------------------" << std::endl;
+  r == 0 && replica_client.replica_close();
+  r == 0 && std::cout << "---------------disconnect------------------------" << std::endl;
   replica_client.disconnect();
   std::cout << "---------------cachefree-------------------------" << std::endl;
   std::cout << replica_client.cache_free() << std::endl;
   std::cout << "---------------cleanup---------------------------" << std::endl;
 
+  // replica_client.shutdown();
+
+  // std::cout << "---------------cleanup---------------------------" << std::endl;
 //  cleanup:
-  reactor.reset();
+  // reactor.reset();
   unregister_async_signal_handler(SIGHUP, sighup_handler);
   unregister_async_signal_handler(SIGINT, handle_signal);
   unregister_async_signal_handler(SIGTERM, handle_signal);
