@@ -1,4 +1,5 @@
 #include <thread>
+#include <chrono>
 
 #include "ReplicaClient.h"
 #include "Reactor.h"
@@ -25,20 +26,47 @@ namespace librbd::cache::pwl::rwl::replica {
 
 using namespace librbd::cls_client;
 
+ReplicaClient::ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name)
+    : _size(size), _copies(copies), _pool_name(std::move(pool_name)), _image_name(std::move(image_name)),
+      _cct(cct), _reactor(std::make_shared<Reactor>(cct)) {}
+
+ReplicaClient::~ReplicaClient() {
+  ldout(_cct, 20) << dendl;
+  shutdown();
+}
+
+void ReplicaClient::shutdown() {
+  _reactor->shutdown();
+  rados.shutdown();
+}
+
 int ReplicaClient::flush(size_t offset, size_t len) {
   int r = 0;
   for (auto &daemon : _daemons) {
     if (!daemon.client_handler) continue;
-    std::atomic<bool> completed{false};
-    r = daemon.client_handler->flush(offset, len, [&completed]() mutable {
-      completed = true;
+    {
+      std::lock_guard locker(flush_lock);
+      one_flush_finish = false;
+    }
+    r = daemon.client_handler->flush(offset, len, [this]() mutable {
+      {
+        std::lock_guard locker(this->flush_lock);
+        this->one_flush_finish = true;
+      }
+      this->flush_var.notify_one();
     });
     if (r != 0) {
       ldout(_cct, 1) << "rpma_flush error: " << r << dendl;
       return r;
     }
-    while(completed == false);
+    std::unique_lock locker(flush_lock);
+    using namespace std::chrono_literals;
+    flush_var.wait_for(locker, 30s,[this]{return this->one_flush_finish;});
+    if (one_flush_finish != true) {
+      return -1;
+    }
   }
+  ldout(_cct, 1) << "_write_nums: " << _write_nums.load() << dendl;
   return 0;  
 }
 
@@ -46,15 +74,15 @@ int ReplicaClient::write(size_t offset, size_t len) {
   int r = 0;
   for (auto &daemon : _daemons) {
     if (!daemon.client_handler) continue;
-    std::atomic<bool> completed{false};
-    r = daemon.client_handler->write(offset, len, [&completed]() mutable {
-      completed = true;
+    _write_nums.fetch_add(1);
+    r = daemon.client_handler->write(offset, len, [this]() mutable {
+      ldout(this->_cct, 20) << "write success" << dendl;
+      this->_write_nums.fetch_sub(1);
     });
     if (r != 0) {
       ldout(_cct, 1) << "rpma_write error: " << r << dendl;
       return r;
     }
-    while(completed == false);
   }
   return 0;
 }
@@ -93,6 +121,7 @@ int ReplicaClient::replica_init() {
     _need_free_daemons.insert(daemon.id); //maybe it create cachefile in replica daemon, but reply failed
     r = daemon.client_handler->init_replica(_cache_id, _size, _pool_name, _image_name);
     if (r < 0) {
+      replica_close();
       return r;
     }
   }
@@ -163,6 +192,7 @@ int ReplicaClient::cache_request() {
     ldout(_cct, 1) << "rwlcache_request: " << r << cpp_strerror(r) << dendl;
     return r;
   }
+  ldout(_cct, 20) << "cache_id: " << _cache_id << dendl;
 
   cls::rbd::RwlCacheInfo info;
   r = rwlcache_get_cacheinfo(&io_ctx, _cache_id, info);
@@ -198,9 +228,7 @@ int ReplicaClient::cache_request() {
   }
 
   std::thread([this]{
-    while(this->_reactor) {
-      this->_reactor->handle_events();
-    }
+    this->_reactor->handle_events();
   }).detach();
 
   for (auto &daemon : _daemons) {
@@ -218,10 +246,7 @@ int ReplicaClient::cache_request() {
   }
 
   if (r == 0) {
-    if ((r = replica_init()) != 0) {
-      // allocate cachefile failed in some remote daemon
-      replica_close();
-    }
+    r = replica_init();
   }
 
 request_ack:
@@ -229,13 +254,12 @@ request_ack:
   // Or it will be blocked on waiting established.
   // TODO: there should have success and failed
   cls::rbd::RwlCacheRequestAck ack{_cache_id, r, _need_free_daemons};
-  r = rwlcache_request_ack(&io_ctx, ack);
-  if (r < 0) {
-    ldout(_cct, 1) << "rwlcache_request_ack: " << r << cpp_strerror(r) << dendl;
-    return r;
+  int ret = rwlcache_request_ack(&io_ctx, ack);
+  if (ret < 0) {
+    ldout(_cct, 1) << "rwlcache_request_ack: " << ret << cpp_strerror(ret) << dendl;
   }
 
-  return 0;
+  return r;
 }
 
 }
