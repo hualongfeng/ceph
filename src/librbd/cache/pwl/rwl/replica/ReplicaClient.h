@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <condition_variable>
+#include <mutex>
 
 #include "include/rados/librados.hpp"
 #include "Types.h"
@@ -37,6 +39,12 @@ class ReplicaClient {
   std::vector<DaemonInfo> _daemons;
   std::set<uint64_t> _need_free_daemons;
 
+  std::atomic<uint64_t> _write_nums{0U}; // the number of current writing, this is, it initiate write operation, but not finished.
+
+  std::mutex flush_lock;
+  std::condition_variable flush_var;
+  bool one_flush_finish;
+
   librados::Rados rados;
   librados::IoCtx io_ctx;
   CephContext *_cct;
@@ -44,11 +52,9 @@ class ReplicaClient {
   ReactorPtr _reactor;
 
 public:
-  ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name)
-    : _size(size), _copies(copies), _pool_name(std::move(pool_name)), _image_name(std::move(image_name)), _cct(cct),
-      _reactor(std::make_shared<Reactor>(cct)) {}
-  ~ReplicaClient(){}
-
+  ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name);
+  ~ReplicaClient();
+  void shutdown();
   int init_rados();
   int init_ioctx();
   int cache_request();
