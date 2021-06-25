@@ -66,14 +66,14 @@ protected:
 // Handles client connection requests.
 class AcceptorHandler : public EventHandlerInterface, public std::enable_shared_from_this<AcceptorHandler> {
 public:
-  // Initialize the acceptor endpoint and register
-  // with the Initiation Dispatcher
   AcceptorHandler(CephContext *cct,
                   const std::string& addr,
                   const std::string& port,
                   const std::weak_ptr<Reactor> reactor_manager);
 
   ~AcceptorHandler();
+  AcceptorHandler(const AcceptorHandler &) = delete;
+  AcceptorHandler& operator=(const AcceptorHandler &) = delete;
 
   virtual int register_self() override;
   virtual int remove_self() override;
@@ -83,12 +83,12 @@ public:
   // using the connection.
   virtual int handle(EventType et) override;
 
-  // Get the I/O  Handle (called by Initiation Dispatcher when
-  // Logging Acceptor is registered).
+  // Get the I/O  Handle (called by Reactor when
+  // Acceptor is registered).
   virtual Handle get_handle(EventType et) const override;
   virtual const char* name() const override { return "AcceptorHandler"; }
+
 private:
-  // Socket factory that accepts client connection.
   Handle _fd;
   std::string _address;
   std::string _port;
@@ -101,13 +101,11 @@ class ConnectionHandler : public EventHandlerInterface {
 public:
   ConnectionHandler(CephContext *cct, const std::weak_ptr<Reactor> reactor_manager);
   ~ConnectionHandler();
-  // virtual int register_self() = 0;
-  // virtual int remove_self() = 0;
 
-  // Hook method that handles the connection request from clients.
+  // Hook method that handles the connection.
   virtual int handle(EventType et) override;
-   // Get the I/O Handle (called by the RPMA_Reactor when
-  // RPMA_Handler is registered).
+   // Get the I/O Handle (called by the Reactor when
+  // the Handler is registered).
   virtual Handle get_handle(EventType et) const override;
 
   int handle_completion();
@@ -115,13 +113,14 @@ public:
 
   int send(std::function<void()> callback);
   int recv(std::function<void()> callback);
+
   virtual const char* name() const override { return "ConnectionHandler"; }
+
   bool connecting() {return connected.load();}
   // wait for the connection to establish
   int wait_established();
+
 protected:
-  using clock = ceph::coarse_mono_clock;
-  using time = ceph::coarse_mono_time;
   // Notice: call this function after peer is initialized.
   void init_send_recv_buffer();
   // Notice: call this function after conn is initialized.
