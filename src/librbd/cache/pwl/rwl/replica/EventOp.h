@@ -197,16 +197,14 @@ public:
   int set_head(void *head_ptr, uint64_t size);
   virtual const char* name() const override { return "ClientHandler"; }
 private:
-  enum rpma_flush_type _flush_type;
   std::string _address;
   std::string _port;
-  // memory resource
-  // MemoryManager data_manager;
+
   void *data_header;
   unique_rpma_mr_ptr data_mr;
+
   size_t _image_size;
   struct rpma_mr_remote* _image_mr{nullptr};
-  std::string _image_name;
 
   std::mutex message_lock;
   std::condition_variable cond_var;

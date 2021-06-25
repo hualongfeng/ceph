@@ -91,7 +91,7 @@ AcceptorHandler::AcceptorHandler(CephContext *cct,
   int ret = 0;
   struct rpma_peer *peer = nullptr;
   ret = common_peer_via_address(addr.c_str(), RPMA_UTIL_IBV_CONTEXT_LOCAL, &peer);
-  // ret = server_peer_via_address(addr.c_str(), &peer);
+
   if (ret) {
     throw std::runtime_error("lookup an ibv_context via the address and create a new peer using it failed");
   }
@@ -235,7 +235,6 @@ int ConnectionHandler::handle_connection_event() {
       lderr(_cct) << "out of memory" << dendl;
     }
 
-    // rpma_conn_disconnect(_conn.get());
     _conn.disconnect();
     return ret;
   }
@@ -520,7 +519,7 @@ int RPMAHandler::get_descriptor_for_write() {
   }
 
   ldout(_cct, 20) << "succeed to register: "
-                  << init_reply.type
+                  << (init_reply.type == RWL_REPLICA_INIT_SUCCESSED)
                   << dendl;
 
   bufferlist bl;
@@ -607,6 +606,7 @@ ClientHandler::ClientHandler(CephContext *cct,
   rpma_conn_cfg_set_sq_size(cfg_ptr, 200);
   rpma_conn_cfg_set_rq_size(cfg_ptr, 200);
   rpma_conn_cfg_set_cq_size(cfg_ptr, 200);
+  rpma_conn_cfg_set_timeout(cfg_ptr, 9000); //ms
 
   ret = rpma_conn_req_new(peer, addr.c_str(), port.c_str(), cfg_ptr, &req);
   rpma_conn_cfg_delete(&cfg_ptr);
@@ -692,14 +692,6 @@ int ClientHandler::get_remote_descriptor() {
                      << size << " < " << _image_size << ")"
                      << dendl;
       return -1;
-    }
-    /* determine the flush type */
-    if (direct_write_to_pmem) {
-      ldout(_cct, 10) << "RPMA_FLUSH_TYPE_PERSISTENT is supported" << dendl;
-      _flush_type = RPMA_FLUSH_TYPE_PERSISTENT;
-    } else {
-      ldout(_cct, 10) << "RPMA_FLUSH_TYPE_PERSISTENT is NOT supported" << dendl;
-      _flush_type = RPMA_FLUSH_TYPE_VISIBILITY;
     }
   }
   return ret;
@@ -788,8 +780,8 @@ int ClientHandler::set_head(void *head_ptr, uint64_t size) {
 int ClientHandler::write(size_t offset,
                          size_t len,
                          std::function<void()> callback) {
-  assert(data_mr);
-  assert(len <= 1024 * 1024 * 1024);
+  ceph_assert(data_mr);
+  ceph_assert(len <= 1024 * 1024 * 1024);
   std::unique_ptr<RpmaWrite> uwrite = std::make_unique<RpmaWrite>(callback);
 
   int ret = (*uwrite)(_conn.get(), _image_mr, offset, data_mr.get(), offset, len, RPMA_F_COMPLETION_ALWAYS, uwrite.get());
@@ -803,9 +795,9 @@ int ClientHandler::write(size_t offset,
 int ClientHandler::flush(size_t offset,
                          size_t len,
                          std::function<void()> callback) {
-  assert(data_mr);
+  ceph_assert(data_mr);
   std::unique_ptr<RpmaFlush> uflush = std::make_unique<RpmaFlush>(callback);
-  int ret = (*uflush)(_conn.get(), _image_mr, offset, len, _flush_type, RPMA_F_COMPLETION_ALWAYS, uflush.get());
+  int ret = (*uflush)(_conn.get(), _image_mr, offset, len, RPMA_FLUSH_TYPE_PERSISTENT, RPMA_F_COMPLETION_ALWAYS, uflush.get());
   if (ret == 0) {
     callback_table.insert(uflush.get());
     uflush.release();
