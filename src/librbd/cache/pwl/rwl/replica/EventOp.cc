@@ -243,7 +243,11 @@ int ConnectionHandler::handle_connection_event() {
   /* proceed to the callback specific to the received event */
   if (event == RPMA_CONN_ESTABLISHED) {
     ldout(_cct, 10) << "RPMA_CONN_ESTABLISHED" << dendl;
-    connected = true;
+    {
+      std::lock_guard locker(connect_lock);
+      connected.store(true);
+    }
+    connect_cond_var.notify_one();
     return 0;
   } else if (event == RPMA_CONN_CLOSED) {
     ldout(_cct, 10) << "RPMA_CONN_CLOSED" << dendl;
@@ -252,7 +256,7 @@ int ConnectionHandler::handle_connection_event() {
   } else {
     ldout(_cct, 10) << "RPMA_CONN_UNDEFINED" << dendl;
   }
-  connected = false;
+  connected.store(false);
   ret = remove_self();
   return ret;
 }
@@ -338,17 +342,10 @@ int ConnectionHandler::handle_completion() {
 }
 
 int ConnectionHandler::wait_established() {
-  std::cout << "I'm in wait_established()" << std::endl;
-  double cost_time;
-  auto start = clock::now();
-  while(connected.load() == false && cost_time < 10e6) { // cost_time < 1s
-    std::this_thread::yield();
-    auto end = clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    cost_time = duration.count();
-  }
-  ldout(_cct, 10) << "cost time: " << cost_time << dendl;
-
+  ldout(_cct, 20) << dendl;
+  using namespace std::chrono_literals;
+  std::unique_lock locker(connect_lock);
+  connect_cond_var.wait_for(locker, 3s, [this]{return this->connected.load();});
   return connected.load() == true ? 0 : -1;
 }
 
@@ -720,22 +717,24 @@ int ClientHandler::init_replica(epoch_t cache_id, uint64_t cache_size, std::stri
   init.encode(bl);
   assert(bl.length() < MSG_SIZE);
   memcpy(send_bl.c_str(), bl.c_str(), bl.length());
-  auto start = clock::now();
-  std::atomic<bool> completed = false;
-  recv([this, &completed] () mutable {
+  {
+    std::lock_guard locker(message_lock);
+    recv_completed = false;
+  }
+  recv([this] () mutable {
     get_remote_descriptor();
-    completed = true;
+    {
+      std::lock_guard locker(message_lock);
+      this->recv_completed = true;
+    }
+    this->cond_var.notify_one();
   });
   send(nullptr);
-  double cost_time;
-  while(completed == false && cost_time < 10e6) { // cost_time < 1s
-    std::this_thread::yield();
-    auto end = clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    cost_time = duration.count();
-  }
-  ldout(_cct, 10) << "cost time: " << cost_time << dendl;
-  return (completed == true ? (_image_mr == nullptr ? -28 : 0) : -1);
+  using namespace std::chrono_literals;
+  std::unique_lock locker(message_lock);
+  cond_var.wait_for(locker, 5s,[this]{return this->recv_completed;});
+
+  return (recv_completed == true ? (_image_mr == nullptr ? -28 : 0) : -1);
 }
 
 int ClientHandler::close_replica() {
@@ -745,31 +744,30 @@ int ClientHandler::close_replica() {
   finish.encode(bl);
   assert(bl.length() < MSG_SIZE);
   memcpy(send_bl.c_str(), bl.c_str(), bl.length());
-
-  auto start = clock::now();
-  std::atomic<bool> completed = false;
-  std::atomic<bool> successed = false;
-  recv([this, &completed, &successed] () mutable {
+  {
+    std::lock_guard locker(message_lock);
+    recv_completed = false;
+    finished_success = false;
+  }
+  recv([this] () mutable {
     RwlReplicaFinishedRequestReply reply;
     auto it = recv_bl.cbegin();
     reply.decode(it);
-    if (reply.type == RWL_REPLICA_FINISHED_SUCCCESSED) {
-      successed = true;
-    } else {
-      successed = false;
+    {
+      std::lock_guard locker(message_lock);
+      this->recv_completed = true;
+      if (reply.type == RWL_REPLICA_FINISHED_SUCCCESSED) {
+        this->finished_success = true;
+      }
     }
-    completed = true;
+    this->cond_var.notify_one();
   });
   send(nullptr);
-  double cost_time;
-  while(completed == false && cost_time < 10e6) { // cost_time < 1s
-    std::this_thread::yield();
-    auto end = clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    cost_time = duration.count();
-  }
-  ldout(_cct, 10) << "cost time: " << cost_time << dendl;
-  return ((completed == true && successed == true) ? 0 : -1);
+  using namespace std::chrono_literals;
+  std::unique_lock locker(message_lock);
+  cond_var.wait_for(locker, 5s,[this]{return this->recv_completed;});
+
+  return ((recv_completed == true && finished_success == true) ? 0 : -1);
 }
 
 int ClientHandler::disconnect() {

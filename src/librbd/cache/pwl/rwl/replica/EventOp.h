@@ -11,7 +11,9 @@
 #include "RpmaOp.h"
 #include "Types.h"
 #include "include/rados/librados.hpp"
-#include "common/ceph_context.h"
+
+#include <condition_variable>
+#include <mutex>
 
 namespace librbd::cache::pwl::rwl::replica {
 
@@ -109,13 +111,12 @@ public:
   int handle_completion();
   int handle_connection_event();
 
-  // wait for the connection to establish
-  int wait_established();
-
   int send(std::function<void()> callback);
   int recv(std::function<void()> callback);
   virtual const char* name() const override { return "ConnectionHandler"; }
   bool connecting() {return connected.load();}
+  // wait for the connection to establish
+  int wait_established();
 protected:
   using clock = ceph::coarse_mono_clock;
   using time = ceph::coarse_mono_time;
@@ -137,7 +138,10 @@ protected:
   Handle _conn_fd;
   Handle _comp_fd;
 
+private:
   std::atomic<bool> connected{false};
+  std::mutex connect_lock;
+  std::condition_variable connect_cond_var;
 };
 
 class RPMAHandler : public ConnectionHandler, public std::enable_shared_from_this<RPMAHandler>{
@@ -192,7 +196,6 @@ public:
   int set_head(void *head_ptr, uint64_t size);
   virtual const char* name() const override { return "ClientHandler"; }
 private:
-
   enum rpma_flush_type _flush_type;
   std::string _address;
   std::string _port;
@@ -203,6 +206,11 @@ private:
   size_t _image_size;
   struct rpma_mr_remote* _image_mr{nullptr};
   std::string _image_name;
+
+  std::mutex message_lock;
+  std::condition_variable cond_var;
+  bool recv_completed;
+  bool finished_success;
 };
 
 } //namespace ceph::librbd::cache::pwl::rwl::replica
