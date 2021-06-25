@@ -17,6 +17,19 @@
 
 namespace librbd::cache::pwl::rwl::replica {
 
+static int fd_set_nonblock(int fd) {
+  int ret = fcntl(fd, F_GETFL);
+  if (ret < 0)
+    return errno;
+
+  int flags = ret | O_NONBLOCK;
+  ret = fcntl(fd, F_SETFL, flags);
+  if (ret < 0)
+    return errno;
+
+  return 0;
+}
+
 Reactor::Reactor(CephContext *cct) : _stop(false), _cct(cct) {
   ldout(_cct, 20) << dendl;
   _epoll = epoll_create1(EPOLL_CLOEXEC);
@@ -28,19 +41,6 @@ Reactor::Reactor(CephContext *cct) : _stop(false), _cct(cct) {
 Reactor::~Reactor() {
   ldout(_cct, 20) << dendl;
   close(_epoll);
-}
-
-int Reactor::fd_set_nonblock(int fd) {
-  int ret = fcntl(fd, F_GETFL);
-  if (ret < 0)
-    return errno;
-
-  int flags = ret | O_NONBLOCK;
-  ret = fcntl(fd, F_SETFL, flags);
-  if (ret < 0)
-    return errno;
-
-  return 0;
 }
 
 int Reactor::register_handler(EventHandlerPtr eh, EventType et) {
@@ -89,7 +89,7 @@ int Reactor::remove_handler(EventHandlerPtr eh, EventType et) {
 
 void Reactor::shutdown() {
   ldout(_cct, 20) << dendl;
-  _stop = true;
+  _stop.store(true);
   for (auto &it : _event_table) {
     Handle fd = it.first;
     epoll_ctl(_epoll, EPOLL_CTL_DEL, fd, NULL);
@@ -97,14 +97,12 @@ void Reactor::shutdown() {
   _event_table.clear();
 }
 
-
-//int Reactor::handle_events(TimeValue *timeout = 0) {
 int Reactor::handle_events() {
   int ret = 0;
   /* process epoll's events */
   struct epoll_event event;
   EventHandle *event_handle;
-  while (!_stop) {
+  while (!_stop.load()) {
     while ((ret = epoll_wait(_epoll, &event, 1 /* # of events */,
                                 0)) == 1) {
       event_handle = static_cast<EventHandle*>(event.data.ptr);
@@ -112,7 +110,7 @@ int Reactor::handle_events() {
       event_handle->handler->handle(event_handle->type);
       if (empty()) {
         ldout(_cct, 10) << "My event_table is empty!!!" << dendl;
-        _stop = true;
+        _stop.store(true);
         break;
       }
     }
