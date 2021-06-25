@@ -56,6 +56,8 @@ public:
   EventHandlerInterface(CephContext *cct, std::weak_ptr<Reactor> reactor_ptr): _reactor_manager(reactor_ptr), _cct(cct) {}
   ~EventHandlerInterface() {}
   virtual const char* name() const = 0;
+  virtual int register_self() = 0;
+  virtual int remove_self() = 0;
 protected:
   std::weak_ptr<Reactor> _reactor_manager;
   CephContext *_cct;
