@@ -28,10 +28,6 @@ public:
 
   // Hook method that returns the underlying I/O handle.
   virtual Handle get_handle(EventType et) const = 0;
-
-  virtual int register_self() = 0;
-  virtual int remove_self() = 0;
-
 };
 
 using EventHandlerPtr = std::shared_ptr<EventHandler>;
