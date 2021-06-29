@@ -119,6 +119,7 @@ public:
   bool connecting() {return connected.load();}
   // wait for the connection to establish
   int wait_established();
+  int wait_disconnected();
 
 protected:
   // Notice: call this function after peer is initialized.
@@ -127,6 +128,7 @@ protected:
   void init_conn_fd();
 
   std::set<RpmaOp*> callback_table;
+  std::mutex callback_lock;
 
   std::shared_ptr<struct rpma_peer> _peer;
   RpmaConn _conn;

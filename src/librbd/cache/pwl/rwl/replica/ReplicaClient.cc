@@ -176,6 +176,7 @@ void ReplicaClient::disconnect() {
   for (auto &daemon : _daemons) {
     if (daemon.client_handler) {
       daemon.client_handler->disconnect();
+      daemon.client_handler->wait_disconnected();
       daemon.client_handler.reset();
     }
   }
