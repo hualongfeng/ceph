@@ -246,7 +246,7 @@ int ConnectionHandler::handle_connection_event() {
       std::lock_guard locker(connect_lock);
       connected.store(true);
     }
-    connect_cond_var.notify_one();
+    connect_cond_var.notify_all();
     return 0;
   } else if (event == RPMA_CONN_CLOSED) {
     ldout(_cct, 10) << "RPMA_CONN_CLOSED" << dendl;
@@ -255,7 +255,11 @@ int ConnectionHandler::handle_connection_event() {
   } else {
     ldout(_cct, 10) << "RPMA_CONN_UNDEFINED" << dendl;
   }
-  connected.store(false);
+  {
+    std::lock_guard locker(connect_lock);
+    connected.store(false);
+  }
+  connect_cond_var.notify_all();
   ret = remove_self();
   return ret;
 }
@@ -334,7 +338,10 @@ int ConnectionHandler::handle_completion() {
 
   if (cmpl.op_context != nullptr) {
     auto op_func = std::unique_ptr<RpmaOp>{static_cast<RpmaOp*>(const_cast<void *>(cmpl.op_context))};
-    callback_table.erase(op_func.get());
+    {
+      std::lock_guard locker{callback_lock};
+      callback_table.erase(op_func.get());
+    }
     op_func->do_callback();
   }
   return ret;
@@ -348,12 +355,23 @@ int ConnectionHandler::wait_established() {
   return connected.load() == true ? 0 : -1;
 }
 
+int ConnectionHandler::wait_disconnected() {
+  ldout(_cct, 20) << dendl;
+  using namespace std::chrono_literals;
+  std::unique_lock locker(connect_lock);
+  connect_cond_var.wait_for(locker, 3s, [this]{return !this->connected.load();});
+  return connected.load() == false ? 0 : -1;
+}
+
 int ConnectionHandler::send(std::function<void()> callback) {
   int ret = 0;
   std::unique_ptr<RpmaSend> usend = std::make_unique<RpmaSend>(callback);
   ret = (*usend)(_conn.get(), send_mr.get(), 0, MSG_SIZE,RPMA_F_COMPLETION_ALWAYS, usend.get());
   if (ret == 0) {
-    callback_table.insert(usend.get());
+    {
+      std::lock_guard locker{callback_lock};
+      callback_table.insert(usend.get());
+    }
     usend.release();
   }
   return ret;
@@ -364,7 +382,10 @@ int ConnectionHandler::recv(std::function<void()> callback) {
   std::unique_ptr<RpmaRecv> rec = std::make_unique<RpmaRecv>(callback);
   ret = (*rec)(_conn.get(), recv_mr.get(), 0, MSG_SIZE, rec.get());
   if (ret == 0) {
-    callback_table.insert(rec.get());
+    {
+      std::lock_guard locker{callback_lock};
+      callback_table.insert(rec.get());
+    }
     rec.release();
   }
   return ret;
@@ -786,7 +807,10 @@ int ClientHandler::write(size_t offset,
 
   int ret = (*uwrite)(_conn.get(), _image_mr, offset, data_mr.get(), offset, len, RPMA_F_COMPLETION_ALWAYS, uwrite.get());
   if (ret == 0) {
-    callback_table.insert(uwrite.get());
+    {
+      std::lock_guard locker{callback_lock};
+      callback_table.insert(uwrite.get());
+    }
     uwrite.release();
   }
   return ret;
@@ -799,7 +823,10 @@ int ClientHandler::flush(size_t offset,
   std::unique_ptr<RpmaFlush> uflush = std::make_unique<RpmaFlush>(callback);
   int ret = (*uflush)(_conn.get(), _image_mr, offset, len, RPMA_FLUSH_TYPE_PERSISTENT, RPMA_F_COMPLETION_ALWAYS, uflush.get());
   if (ret == 0) {
-    callback_table.insert(uflush.get());
+    {
+      std::lock_guard locker{callback_lock};
+      callback_table.insert(uflush.get());
+    }
     uflush.release();
   }
   return ret;

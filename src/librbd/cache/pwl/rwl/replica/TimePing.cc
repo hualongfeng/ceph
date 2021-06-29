@@ -1,12 +1,8 @@
 #include "TimerPing.h"
-
-#if __has_include(<filesystem>)
+#include <mutex>
 #include <filesystem>
 namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
+
 
 #include "cls/rbd/cls_rbd_types.h"
 #include "cls/rbd/cls_rbd_client.h"
@@ -32,10 +28,9 @@ DaemonPing::DaemonPing(CephContext *cct, librados::Rados &rados, librados::IoCtx
   _ping_timer(cct, _mutex) {
 }
 DaemonPing::~DaemonPing() {
-  _mutex.lock();
+  std::lock_guard locker(_mutex);
   _ping_timer.cancel_all_events();
   _ping_timer.shutdown();
-  _mutex.unlock();
 }
 
 void DaemonPing::init(std::shared_ptr<Reactor> reactor) {
@@ -44,9 +39,8 @@ void DaemonPing::init(std::shared_ptr<Reactor> reactor) {
 }
 
 int DaemonPing::timer_ping() {
-  _mutex.lock();
+  std::lock_guard locker(_mutex);
   _ping_timer.add_event_after(100, new C_Ping(shared_from_this()));
-  _mutex.unlock();
   return 0;
 }
 
@@ -152,9 +146,7 @@ void DaemonPing::C_Ping::finish(int r) {
     return;
   }
   
-  // dp->_mutex.lock();
   dp->_ping_timer.add_event_after(100, new C_Ping(dp));
-  // dp->_mutex.unlock();
 
   dp->free_caches();
 }
