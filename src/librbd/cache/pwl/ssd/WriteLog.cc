@@ -354,9 +354,9 @@ void WriteLog<I>::schedule_append_ops(GenericLogOperations &ops) {
     this->m_ops_to_append.splice(this->m_ops_to_append.end(), ops);
   }
 
-  if (need_finisher) {
+//  if (need_finisher) {
     this->enlist_op_appender();
-  }
+//  }
 
   for (auto &op : appending) {
     op->appending();
@@ -368,10 +368,10 @@ void WriteLog<I>::setup_schedule_append(pwl::GenericLogOperationsVector &ops,
                                         bool do_early_flush,
                                         C_BlockIORequestT *req) {
   this->schedule_append(ops);
-  if (this->get_persist_on_flush()) {
-    req->complete_user_request(0);
-  }
-  req->release_cell();
+  // if (this->get_persist_on_flush()) {
+  //   req->complete_user_request(0);
+  // }
+  // req->release_cell();
 }
 
 template <typename I>
