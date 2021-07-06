@@ -6,5 +6,8 @@ tasks:
       image_format: 2
 - exec:
     client.0:
-      - "timeout 10s rbd bench --io-pattern rand --io-type write testimage || true"
+      - "ceph -s"
+      - "timeout 15s rbd bench --io-pattern rand --io-type write testimage || true"
+      - "ceph -s"
       - "rbd bench --io-type write --io-pattern rand --io-total 32M testimage"
+      - "ceph -s"
