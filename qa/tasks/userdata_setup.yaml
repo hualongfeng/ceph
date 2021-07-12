@@ -12,7 +12,6 @@
 
 - |
   #!/usr/bin/env bash
-  sleep 1800
   dhclient
   echo "Acquire::http::proxy \"http://child-prc.intel.com:913\";">>/etc/apt/apt.conf.d/proxy.conf
   echo "Acquire::https::proxy \"http://child-prc.intel.com:913\";">>/etc/apt/apt.conf.d/proxy.conf
