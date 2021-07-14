@@ -1,9 +1,16 @@
 tasks:
 - install:
       # extra packages added for the rgw-datacache task
+      extra_system_packages:
+        deb:
+          - s3cmd
+        rpm:
+          - s3cmd
       extra_packages:
-        deb: ['s3cmd']
-        rpm: ['s3cmd']
+        deb:
+          - ceph-immutable-object-cache
+        rpm:
+          - ceph-immutable-object-cache
 - ceph:
 - openssl_keys:
 - rgw:
