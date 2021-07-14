@@ -354,7 +354,7 @@ void WriteLog<I>::schedule_append_ops(GenericLogOperations &ops, C_BlockIOReques
     this->m_ops_to_append.splice(this->m_ops_to_append.end(), ops);
 
     if (req != nullptr) {
-      if (this->get_persist_on_flush()) {
+      if (persist_on_flush) {
         req->complete_user_request(0);
       }
       req->release_cell();

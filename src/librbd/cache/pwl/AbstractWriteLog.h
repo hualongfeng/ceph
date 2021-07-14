@@ -360,7 +360,7 @@ protected:
 
   virtual void process_work() = 0;
   virtual void append_scheduled_ops(void) = 0;
-  virtual void schedule_append_ops(pwl::GenericLogOperations &ops, C_BlockIORequestT *req = nullptr) = 0;
+  virtual void schedule_append_ops(pwl::GenericLogOperations &ops, C_BlockIORequestT *req) = 0;
   virtual void remove_pool_file() = 0;
   virtual bool initialize_pool(Context *on_finish,
                                pwl::DeferredContexts &later) = 0;

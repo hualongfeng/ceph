@@ -625,7 +625,7 @@ void WriteLog<I>::flush_then_append_scheduled_ops(void)
      * get to the log message append step. */
     if (ops.size()) {
       flush_pmem_buffer(ops);
-      schedule_append_ops(ops);
+      schedule_append_ops(ops, nullptr);
     }
   } while (ops_remain);
   append_scheduled_ops();
