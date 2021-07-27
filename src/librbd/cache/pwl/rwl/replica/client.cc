@@ -72,7 +72,8 @@ int main(int argc, const char* argv[]) {
   rpma_log_set_threshold(RPMA_LOG_THRESHOLD_AUX, RPMA_LOG_LEVEL_INFO);
 
   int r = 0;
-  ReplicaClient replica_client(g_ceph_context, REQUIRE_SIZE, 3, "RBD", "test");
+  auto copies = g_ceph_context->_conf->rwl_replica_copies;
+  ReplicaClient replica_client(g_ceph_context, REQUIRE_SIZE, copies, "RBD", "test");
   r = replica_client.init_rados();
   if (r < 0) {
     std::cerr << "rwl-replica: failed to connect to cluster: " << cpp_strerror(r) << std::endl;

@@ -26,3 +26,11 @@ options:
   services:
   - rwl-replica
   with_legacy: true
+- name: rwl_replica_copies
+  type: int
+  level: advanced
+  desc: the number of replica copy for each primary; only for test
+  default: 3
+  services:
+  - rwl-replica
+  with_legacy: true
