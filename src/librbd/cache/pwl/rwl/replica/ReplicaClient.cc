@@ -28,7 +28,8 @@ using namespace librbd::cls_client;
 
 ReplicaClient::ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name)
     : _size(size), _copies(copies), _pool_name(std::move(pool_name)), _image_name(std::move(image_name)),
-      _cct(cct), _reactor(std::make_shared<Reactor>(cct)) {}
+      _cct(cct), _reactor(std::make_shared<Reactor>(cct)),
+      _ping(make_unique<PrimaryPing>(cct, io_ctx, this)) {}
 
 ReplicaClient::~ReplicaClient() {
   ldout(_cct, 20) << dendl;
@@ -42,8 +43,10 @@ void ReplicaClient::shutdown() {
 
 int ReplicaClient::flush(size_t offset, size_t len) {
   int r = 0;
+  size_t cnt = 0;
   for (auto &daemon : _daemons) {
-    if (!daemon.client_handler) continue;
+    if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
+    cnt++;
     {
       std::lock_guard locker(flush_lock);
       one_flush_finish = false;
@@ -67,13 +70,15 @@ int ReplicaClient::flush(size_t offset, size_t len) {
     }
   }
   ldout(_cct, 1) << "_write_nums: " << _write_nums.load() << dendl;
-  return 0;  
+  return (cnt == _daemons.size() ? 0 : -1);
 }
 
 int ReplicaClient::write(size_t offset, size_t len) {
   int r = 0;
+  size_t cnt = 0;
   for (auto &daemon : _daemons) {
-    if (!daemon.client_handler) continue;
+    if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
+    cnt++;
     _write_nums.fetch_add(1);
     r = daemon.client_handler->write(offset, len, [this]() mutable {
       ldout(this->_cct, 20) << "write success" << dendl;
@@ -84,7 +89,7 @@ int ReplicaClient::write(size_t offset, size_t len) {
       return r;
     }
   }
-  return 0;
+  return (cnt == _daemons.size() ? 0 : -1);
 }
 
 int ReplicaClient::cache_free() {
@@ -117,7 +122,7 @@ int ReplicaClient::replica_init() {
                   << dendl;
   int r = 0;
   for (auto &daemon : _daemons) {
-    if (!daemon.client_handler) continue;
+    if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
     _need_free_daemons.insert(daemon.id); //maybe it create cachefile in replica daemon, but reply failed
     r = daemon.client_handler->init_replica(_cache_id, _size, _pool_name, _image_name);
     if (r < 0) {
@@ -174,7 +179,7 @@ int ReplicaClient::init_ioctx() {
 void ReplicaClient::disconnect() {
   ldout(_cct, 20) << dendl;
   for (auto &daemon : _daemons) {
-    if (daemon.client_handler) {
+    if (daemon.client_handler && daemon.client_handler->connecting()) {
       daemon.client_handler->disconnect();
       daemon.client_handler->wait_disconnected();
       daemon.client_handler.reset();
@@ -230,6 +235,7 @@ int ReplicaClient::cache_request() {
 
   std::thread([this]{
     this->_reactor->handle_events();
+    ldout(_cct, 10) << "End with handle events " << dendl;
   }).detach();
 
   for (auto &daemon : _daemons) {
@@ -250,6 +256,10 @@ int ReplicaClient::cache_request() {
     r = replica_init();
   }
 
+  if (r == 0) {
+    _ping->timer_ping();
+  }
+
 request_ack:
   // if the connection failed, what do we do after?
   // Or it will be blocked on waiting established.
@@ -261,6 +271,14 @@ request_ack:
   }
 
   return r;
+}
+
+bool ReplicaClient::single_ping() {
+  ldout(_cct, 20) << dendl;
+  int r = 0;
+  bool has_removed_daemon = true;
+  r = rwlcache_primaryping(&io_ctx, _cache_id, has_removed_daemon);
+  return (r == 0 && !has_removed_daemon);
 }
 
 }

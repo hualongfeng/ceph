@@ -15,9 +15,11 @@
 #include "Reactor.h"
 #include "EventHandler.h"
 #include "EventOp.h"
+#include "TimerPing.h"
 
 namespace librbd::cache::pwl::rwl::replica {
 
+class PrimaryPing;
 class ReplicaClient {
   uint64_t _id;
   uint64_t _size;
@@ -51,6 +53,8 @@ class ReplicaClient {
  
   ReactorPtr _reactor;
 
+  std::unique_ptr<PrimaryPing> _ping;
+
 public:
   ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name);
   ~ReplicaClient();
@@ -65,6 +69,7 @@ public:
   int replica_close();
   int write(size_t offset, size_t len);
   int flush(size_t offset, size_t len);
+  bool single_ping();
   
 };
 

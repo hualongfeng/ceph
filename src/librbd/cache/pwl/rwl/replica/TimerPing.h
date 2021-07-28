@@ -11,6 +11,7 @@
 #include <memory>
 
 #include "Reactor.h"
+#include "ReplicaClient.h"
 
 #include "include/rados/librados.hpp"
 #include "common/ceph_context.h"
@@ -47,6 +48,28 @@ private:
     void finish(int r) override;
 
     std::shared_ptr<DaemonPing> dp;
+  };
+};
+
+class ReplicaClient;
+class PrimaryPing {
+public:
+  CephContext *_cct;
+  librados::IoCtx &_io_ctx;
+  ceph::mutex _mutex;
+  SafeTimer _ping_timer;
+  ReplicaClient* _client;
+public:
+  PrimaryPing(CephContext *cct, librados::IoCtx &io_ctx, ReplicaClient* client);
+  ~PrimaryPing();
+  int timer_ping();
+private:
+  struct C_Ping : public Context {
+    C_Ping(PrimaryPing* ping);
+    ~C_Ping() override;
+    void finish(int r) override;
+
+    PrimaryPing* pping;
   };
 };
 

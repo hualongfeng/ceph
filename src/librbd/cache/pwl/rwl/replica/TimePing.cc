@@ -151,4 +151,32 @@ void DaemonPing::C_Ping::finish(int r) {
   dp->free_caches();
 }
 
+PrimaryPing::PrimaryPing(CephContext *cct, librados::IoCtx &io_ctx, ReplicaClient* client)
+  : _cct(cct), _io_ctx(io_ctx), _mutex(ceph::make_mutex("primary ping")),
+  _ping_timer(cct, _mutex), _client(client)  {
+    _ping_timer.init();
+}
+PrimaryPing::~PrimaryPing() {
+  ldout(_cct, 20) << dendl;
+  std::lock_guard locker(_mutex);
+  _ping_timer.cancel_all_events();
+  _ping_timer.shutdown();
+}
+
+int PrimaryPing::timer_ping() {
+  std::lock_guard locker(_mutex);
+  _ping_timer.add_event_after(5, new C_Ping(this));
+  return 0;
+}
+PrimaryPing::C_Ping::C_Ping(PrimaryPing* ping) : pping(ping) {}
+PrimaryPing::C_Ping::~C_Ping() {}
+void PrimaryPing::C_Ping::finish(int r) {
+  bool ok = pping->_client->single_ping();
+  if (ok) {
+    pping->_ping_timer.add_event_after(5, new C_Ping(pping));
+  } else {
+    pping->_client->shutdown();
+  }
+}
+
 }
