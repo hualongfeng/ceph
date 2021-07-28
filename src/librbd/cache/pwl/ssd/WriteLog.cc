@@ -629,8 +629,8 @@ bool WriteLog<I>::retire_entries(const unsigned long int frees_per_tx) {
             it != retiring_subentries.end(); it++) {
           ceph_assert(m_log_entries.front() == *it);
           m_log_entries.pop_front();
-          if (entry->is_write_entry()) {
-            auto write_entry = static_pointer_cast<WriteLogEntry>(entry);
+          if ((*it)->is_write_entry()) {
+            auto write_entry = static_pointer_cast<WriteLogEntry>(*it);
             this->m_blocks_to_log_entries.remove_log_entry(write_entry);
           }
         }
