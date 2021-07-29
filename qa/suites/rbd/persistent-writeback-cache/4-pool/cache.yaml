@@ -1,6 +1,9 @@
 overrides:
   ceph:
     conf:
+      global:
+          osd_pool_default_size: 1
+          osd_pool_default_min_size: 1
       mon:
         auth_allow_insecure_global_id_reclaim: false
       client:
