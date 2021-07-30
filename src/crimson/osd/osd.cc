@@ -108,6 +108,7 @@ OSD::OSD(int id, uint32_t nonce,
                     __func__, cpp_strerror(r));
     }
   }
+  logger().info("{}: nonce is {}", __func__, nonce);
 }
 
 OSD::~OSD() = default;
@@ -476,6 +477,8 @@ seastar::future<> OSD::start_asok_admin()
 seastar::future<> OSD::stop()
 {
   logger().info("stop");
+  beacon_timer.cancel();
+  tick_timer.cancel();
   // see also OSD::shutdown()
   return prepare_to_stop().then([this] {
     state.set_stopping();

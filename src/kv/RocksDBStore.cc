@@ -319,14 +319,14 @@ int RocksDBStore::tryInterpret(const string &key, const string &val, rocksdb::Op
 {
   if (key == "compaction_threads") {
     std::string err;
-    int f = strict_iecstrtoll(val.c_str(), &err);
+    int f = strict_iecstrtoll(val, &err);
     if (!err.empty())
       return -EINVAL;
     //Low priority threadpool is used for compaction
     opt.env->SetBackgroundThreads(f, rocksdb::Env::Priority::LOW);
   } else if (key == "flusher_threads") {
     std::string err;
-    int f = strict_iecstrtoll(val.c_str(), &err);
+    int f = strict_iecstrtoll(val, &err);
     if (!err.empty())
       return -EINVAL;
     //High priority threadpool is used for flusher
@@ -904,6 +904,7 @@ int RocksDBStore::verify_sharding(const rocksdb::Options& opt,
   status = rocksdb::DB::ListColumnFamilies(rocksdb::DBOptions(opt),
 					   path, &rocksdb_cfs);
   if (!status.ok()) {
+    derr << __func__ << " unable to list column families: " << status.ToString() << dendl;
     return -EIO;
   }
   dout(5) << __func__ << " column families from rocksdb: " << rocksdb_cfs << dendl;
@@ -960,7 +961,7 @@ int RocksDBStore::verify_sharding(const rocksdb::Options& opt,
       size_t cache_size = cct->_conf->rocksdb_cache_size;
       if (auto it = cache_options_map.find("size"); it !=cache_options_map.end()) {
 	std::string error;
-	cache_size = strict_iecstrtoll(it->second.c_str(), &error);
+	cache_size = strict_iecstrtoll(it->second, &error);
 	if (!error.empty()) {
 	  derr << __func__ << " invalid size: '" << it->second << "'" << dendl;
 	}
