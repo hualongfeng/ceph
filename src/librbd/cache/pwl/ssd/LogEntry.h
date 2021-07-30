@@ -41,6 +41,11 @@ public:
   void copy_cache_bl(bufferlist *out_bl) override;
   void remove_cache_bl() override;
   unsigned int get_aligned_data_size() const override;
+  void inc_bl_refs() { bl_refs++; };
+  void dec_bl_refs() { bl_refs--; };
+  unsigned int reader_count() const override {
+    return bl_refs;
+  }
 };
 
 class WriteSameLogEntry : public WriteLogEntry {

@@ -69,7 +69,7 @@ WriteLog<I>::~WriteLog() {
 template <typename I>
 void WriteLog<I>::collect_read_extents(
     uint64_t read_buffer_offset, LogMapEntry<GenericWriteLogEntry> map_entry,
-    std::vector<WriteLogCacheEntry*> &log_entries_to_read,
+    std::vector<std::shared_ptr<GenericWriteLogEntry>> &log_entries_to_read,
     std::vector<bufferlist*> &bls_to_read,
     uint64_t entry_hit_length, Extent hit_extent,
     pwl::C_ReadRequest *read_ctx) {
@@ -88,14 +88,15 @@ void WriteLog<I>::collect_read_extents(
   if (!hit_bl.length()) {
     ldout(m_image_ctx.cct, 5) << "didn't hit RAM" << dendl;
     auto read_extent = read_ctx->read_extents.back();
-    log_entries_to_read.push_back(&write_entry->ram_entry);
+    write_entry->inc_bl_refs();
+    log_entries_to_read.push_back(write_entry);
     bls_to_read.push_back(&read_extent->m_bl);
   }
 }
 
 template <typename I>
 void WriteLog<I>::complete_read(
-    std::vector<WriteLogCacheEntry*> &log_entries_to_read,
+    std::vector<std::shared_ptr<GenericWriteLogEntry>> &log_entries_to_read,
     std::vector<bufferlist*> &bls_to_read,
     Context *ctx) {
   if (!log_entries_to_read.empty()) {
@@ -987,6 +988,66 @@ void WriteLog<I>::aio_read_data_blocks(
   AioTransContext *aio = new AioTransContext(cct, read_ctx);
   for (unsigned int i = 0; i < log_entries.size(); i++) {
     auto log_entry = log_entries[i];
+
+    ceph_assert(log_entry->is_write() || log_entry->is_writesame());
+    uint64_t len = log_entry->is_write() ? log_entry->write_bytes :
+                                           log_entry->ws_datalen;
+    uint64_t align_len = round_up_to(len, MIN_WRITE_ALLOC_SSD_SIZE);
+
+    ldout(cct, 20) << "entry i=" << i << " " << log_entry->write_data_pos
+                   << "~" << len << dendl;
+    ceph_assert(log_entry->write_data_pos >= DATA_RING_BUFFER_OFFSET &&
+                log_entry->write_data_pos < pool_root.pool_size);
+    ceph_assert(align_len);
+    if (log_entry->write_data_pos + align_len > pool_root.pool_size) {
+      // spans boundary, need to split
+      uint64_t len1 = pool_root.pool_size - log_entry->write_data_pos;
+      uint64_t len2 = align_len - len1;
+
+      ldout(cct, 20) << "read " << log_entry->write_data_pos << "~"
+                     << align_len << " spans boundary, split into "
+                     << log_entry->write_data_pos << "~" << len1
+                     << " and " << DATA_RING_BUFFER_OFFSET << "~"
+                     << len2 << dendl;
+      bdev->aio_read(log_entry->write_data_pos, len1, bls[i], &aio->ioc);
+      bdev->aio_read(DATA_RING_BUFFER_OFFSET, len2, bls[i], &aio->ioc);
+    } else {
+      ldout(cct, 20) << "read " << log_entry->write_data_pos << "~"
+                     << align_len << dendl;
+      bdev->aio_read(log_entry->write_data_pos, align_len, bls[i], &aio->ioc);
+    }
+  }
+  bdev->aio_submit(&aio->ioc);
+}
+
+template <typename I>
+void WriteLog<I>::aio_read_data_blocks(
+    std::vector<std::shared_ptr<GenericWriteLogEntry>> &log_entries,
+    std::vector<bufferlist *> &bls, Context *ctx) {
+  ceph_assert(log_entries.size() == bls.size());
+
+  //get the valid part
+  Context *read_ctx = new LambdaContext(
+    [this, log_entries, bls, ctx](int r) {
+      for (unsigned int i = 0; i < log_entries.size(); i++) {
+        bufferlist valid_data_bl;
+	//auto entry = (static_pointer_cast<WriteLogEntry>(log_entries[i]));
+	std::shared_ptr<WriteLogEntry> entry = static_pointer_cast<WriteLogEntry>(log_entries[i]);
+
+        auto length = (entry->ram_entry).is_write() ? (entry->ram_entry).write_bytes
+						      : (entry->ram_entry).ws_datalen;
+        valid_data_bl.substr_of(*bls[i], 0, length);
+        bls[i]->clear();
+        bls[i]->append(valid_data_bl);
+	entry->dec_bl_refs();
+      }
+      ctx->complete(r);
+    });
+
+  CephContext *cct = m_image_ctx.cct;
+  AioTransContext *aio = new AioTransContext(cct, read_ctx);
+  for (unsigned int i = 0; i < log_entries.size(); i++) {
+    WriteLogCacheEntry *log_entry = &(log_entries[i]->ram_entry);
 
     ceph_assert(log_entry->is_write() || log_entry->is_writesame());
     uint64_t len = log_entry->is_write() ? log_entry->write_bytes :
