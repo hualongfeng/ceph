@@ -37,3 +37,5 @@
   # mount the iso image that has the test script
   mkdir /mnt/cdrom
   mount -t auto /dev/cdrom /mnt/cdrom
+
+  sleep 57600

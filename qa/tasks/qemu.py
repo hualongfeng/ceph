@@ -466,6 +466,9 @@ def run_qemu(ctx, config):
         remote.run(args='rbd export rbd/client.0.0 /home/ubuntu/client.0.0')
         remote.run(args='sha256sum /home/ubuntu/client.0.0')
         remote.run(args='rm /home/ubuntu/client.0.0')
+        remote.run(args='ip tuntap add tap0 mode tap || true');
+        remote.run(args='brctl addif br-ipsec tap0 || true');
+
 
         qemu_cmd = 'qemu-system-x86_64'
         if remote.os.package_type == "rpm":
@@ -481,6 +484,7 @@ def run_qemu(ctx, config):
             '-m', str(client_config.get('memory', DEFAULT_MEM)),
             # cd holding metadata for cloud-init
             '-cdrom', '{tdir}/qemu/{client}.iso'.format(tdir=testdir, client=client),
+            '-net nic,model=virtio,macaddr=00:00:00:00:00:01 -net tap,ifname=tap0'
             ]
 
         cachemode = 'none'
