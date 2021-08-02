@@ -468,7 +468,14 @@ def run_qemu(ctx, config):
 #        remote.run(args='sha256sum /home/ubuntu/client.0.0')
 #        remote.run(args='rm /home/ubuntu/client.0.0')
         remote.run(args='sudo apt-get -y install bridge-utils || true');
-        remote.run(args='virsh net-start default');
+        remote.run(args='virsh net-start default || true');
+        remote.run(args='sleep 10');
+        remote.run(args='virsh net-start default || true');
+        remote.run(args='sleep 20');
+        remote.run(args='virsh net-start default || true');
+        remote.run(args='sleep 30');
+        remote.run(args='virsh net-start default || true');
+        remote.run(args='sleep 30');
         remote.run(args='sudo ip tuntap add tap0 mode tap');
         remote.run(args='sudo brctl addif virbr0 tap0');
 
