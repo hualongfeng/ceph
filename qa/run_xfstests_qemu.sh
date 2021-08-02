@@ -8,8 +8,8 @@ set -x
 [ -d "${TESTDIR}" ] || mkdir "${TESTDIR}"
 
 URL_BASE="http://10.239.40.205/software"
-#SCRIPT="run_xfstests-obsolete_force_jianpeng.sh"
-SCRIPT="run_xfstests-obsolete_force.sh"
+SCRIPT="run_xfstests-obsolete_force_jianpeng.sh"
+#SCRIPT="run_xfstests-obsolete_force.sh"
 
 cd "${TESTDIR}"
 
