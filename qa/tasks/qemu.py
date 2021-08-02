@@ -476,6 +476,7 @@ def run_qemu(ctx, config):
         remote.run(args='sleep 30');
         remote.run(args='virsh net-start default || true');
         remote.run(args='sleep 30');
+        remote.run(args='ifconfig');
         remote.run(args='sudo ip tuntap add tap0 mode tap');
         remote.run(args='sudo brctl addif virbr0 tap0');
 
