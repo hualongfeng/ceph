@@ -18,7 +18,8 @@ from teuthology.orchestra import run
 log = logging.getLogger(__name__)
 
 DEFAULT_NUM_DISKS = 2
-DEFAULT_IMAGE_URL = 'http://download.ceph.com/qa/ubuntu-12.04.qcow2'
+#DEFAULT_IMAGE_URL = 'http://download.ceph.com/qa/ubuntu-12.04.qcow2'
+DEFAULT_IMAGE_URL = 'http://10.239.40.205/software/ubuntu-12.04.qcow2'
 DEFAULT_IMAGE_SIZE = 10240 # in megabytes
 ENCRYPTION_HEADER_SIZE = 16 # in megabytes
 DEFAULT_CPUS = 1
@@ -467,6 +468,7 @@ def run_qemu(ctx, config):
         remote.run(args='sha256sum /home/ubuntu/client.0.0')
         remote.run(args='rm /home/ubuntu/client.0.0')
         remote.run(args='sudo apt-get -y install bridge-utils || true');
+        remote.run(args='sudo virsh net-start default || true');
         remote.run(args='sudo ip tuntap add tap0 mode tap || true');
         remote.run(args='sudo brctl addif virbr0 tap0 || true');
 
@@ -485,7 +487,7 @@ def run_qemu(ctx, config):
             '-m', str(client_config.get('memory', DEFAULT_MEM)),
             # cd holding metadata for cloud-init
             '-cdrom', '{tdir}/qemu/{client}.iso'.format(tdir=testdir, client=client),
-            '-net','nic,model=virtio,macaddr=00:00:00:00:00:01', '-net','tap,ifname=tap0',
+            '-net','nic,model=virtio', '-net','tap,ifname=tap0',
             ]
 
         cachemode = 'none'
