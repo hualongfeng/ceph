@@ -484,7 +484,7 @@ def run_qemu(ctx, config):
             '-m', str(client_config.get('memory', DEFAULT_MEM)),
             # cd holding metadata for cloud-init
             '-cdrom', '{tdir}/qemu/{client}.iso'.format(tdir=testdir, client=client),
-            '-net nic,model=virtio,macaddr=00:00:00:00:00:01 -net tap,ifname=tap0'
+            '-net','nic,model=virtio,macaddr=00:00:00:00:00:01', '-net','tap,ifname=tap0',
             ]
 
         cachemode = 'none'
