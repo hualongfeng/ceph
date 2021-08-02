@@ -464,9 +464,9 @@ def run_qemu(ctx, config):
         remote.run(args='sudo udevadm control --reload')
         remote.run(args='sudo udevadm trigger /dev/kvm')
         remote.run(args='ls -l /dev/kvm')
-        remote.run(args='rbd export rbd/client.0.0 /home/ubuntu/client.0.0')
-        remote.run(args='sha256sum /home/ubuntu/client.0.0')
-        remote.run(args='rm /home/ubuntu/client.0.0')
+#        remote.run(args='rbd export rbd/client.0.0 /home/ubuntu/client.0.0')
+#        remote.run(args='sha256sum /home/ubuntu/client.0.0')
+#        remote.run(args='rm /home/ubuntu/client.0.0')
         remote.run(args='sudo apt-get -y install bridge-utils || true');
         remote.run(args='sudo virsh net-start default || true');
         remote.run(args='sudo ip tuntap add tap0 mode tap || true');
