@@ -477,6 +477,7 @@ def run_qemu(ctx, config):
         if remote.os.package_type == "rpm":
             qemu_cmd = "/usr/libexec/qemu-kvm"
         args=[
+            'sudo'
             'adjust-ulimits',
             'ceph-coverage',
             '{tdir}/archive/coverage'.format(tdir=testdir),
