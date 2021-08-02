@@ -9,8 +9,6 @@ set(ceph_rwl_replica_files
 
 add_library(ceph_rwl_replica_lib STATIC ${ceph_rwl_replica_files})
 
-link_directories(${CMAKE_SOURCE_DIR}/src/librbd/cache/pwl/rwl/replica/lib/)
-
 add_executable(ceph-rwl-replica-server server.cc)
 target_link_libraries(ceph-rwl-replica-server
   ceph_rwl_replica_lib
@@ -18,7 +16,7 @@ target_link_libraries(ceph-rwl-replica-server
   global
   ceph-common
   pmem::pmem
-  rpma
+  rpma::rpma
   cls_rbd_client
   libneorados
   )
@@ -31,7 +29,7 @@ target_link_libraries(ceph-rwl-replica-client
   global
   ceph-common
   pmem::pmem
-  rpma
+  rpma::rpma
   cls_rbd_client
   libneorados
   )
