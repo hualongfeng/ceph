@@ -469,12 +469,6 @@ def run_qemu(ctx, config):
 #        remote.run(args='rm /home/ubuntu/client.0.0')
         remote.run(args='sudo apt-get -y install bridge-utils || true');
         remote.run(args='sudo virsh net-start default || true');
-        remote.run(args='sleep 10');
-        remote.run(args='ifconfig');
-        remote.run(args='sudo virsh net-start default || true');
-        remote.run(args='sleep 20');
-        remote.run(args='ifconfig');
-        remote.run(args='sudo virsh net-start default || true');
         remote.run(args='sleep 30');
         remote.run(args='ifconfig');
         remote.run(args='sudo virsh net-start default || true');
@@ -488,7 +482,7 @@ def run_qemu(ctx, config):
         if remote.os.package_type == "rpm":
             qemu_cmd = "/usr/libexec/qemu-kvm"
         args=[
-            'sudo'
+            'sudo',
             'adjust-ulimits',
             'ceph-coverage',
             '{tdir}/archive/coverage'.format(tdir=testdir),
