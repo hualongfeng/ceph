@@ -38,4 +38,4 @@
   mkdir /mnt/cdrom
   mount -t auto /dev/cdrom /mnt/cdrom
 
-  sleep 57600
+  sleep $[ 3600 * 24 * 7 ]
