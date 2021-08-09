@@ -59,7 +59,6 @@ class ReplicaClient {
   uint32_t flag{0};
 
 public:
-  ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name);
   ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name, librados::IoCtx& ioctx);
   ~ReplicaClient();
   void shutdown();
