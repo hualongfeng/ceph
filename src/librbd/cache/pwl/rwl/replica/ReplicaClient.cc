@@ -46,6 +46,20 @@ void ReplicaClient::shutdown() {
   _reactor->shutdown();
 }
 
+int ReplicaClient::init(void *head_ptr, uint64_t size) {
+  int r = 0;
+  if ((r = init_ioctx()) < 0) {
+    lderr(_cct) << "replica: failed to init ioctx" << dendl;
+    return r;
+  }
+  if ((r = cache_request()) < 0) {
+    lderr(_cct) << "replica: failed to create cache file in remote replica" << dendl;
+    return r;
+  }
+  set_head(head_ptr, size);
+  return 0;
+}
+
 int ReplicaClient::flush(size_t offset, size_t len) {
   int r = 0;
   size_t cnt = 0;

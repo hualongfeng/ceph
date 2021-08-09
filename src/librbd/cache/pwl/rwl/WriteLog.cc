@@ -333,20 +333,11 @@ bool WriteLog<I>::initialize_pool(Context *on_finish, pwl::DeferredContexts &lat
       lderr(cct) << "replica: failed to construction" << dendl;
     }
 
-    if (m_replica_pool && m_replica_pool->init_ioctx() < 0) {
-      lderr(cct) << "replica: failed to init ioctx" << dendl;
-      m_replica_pool.reset();
-    }
-    if (m_replica_pool && m_replica_pool->cache_request() < 0) {
-      lderr(cct) << "replica: failed to create cache file in remote replica" << dendl;
-      m_replica_pool.reset();
-    }
-    if (m_replica_pool == nullptr) {
+    if (m_replica_pool->init(m_log_pool->get_head_addr(), m_log_pool->get_mapped_len()) < 0) {
       lderr(cct) << "replica: failed to init" << dendl;
       on_finish->complete(-errno);
       return false;
     }
-    m_replica_pool->set_head(m_log_pool->get_head_addr(), m_log_pool->get_mapped_len());
 
     m_cache_state->present = true;
     m_cache_state->clean = true;

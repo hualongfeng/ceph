@@ -63,6 +63,7 @@ public:
   ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name, librados::IoCtx& ioctx);
   ~ReplicaClient();
   void shutdown();
+  int init(void *head_ptr, uint64_t size);
   int init_ioctx();
   int cache_request();
   int cache_free();
