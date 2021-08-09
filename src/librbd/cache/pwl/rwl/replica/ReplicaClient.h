@@ -64,6 +64,7 @@ public:
   ~ReplicaClient();
   void shutdown();
   int init(void *head_ptr, uint64_t size);
+  void close();
   int init_ioctx();
   int cache_request();
   int cache_free();

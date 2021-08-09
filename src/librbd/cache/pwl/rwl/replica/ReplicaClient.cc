@@ -60,6 +60,12 @@ int ReplicaClient::init(void *head_ptr, uint64_t size) {
   return 0;
 }
 
+void ReplicaClient::close() {
+  replica_close();
+  disconnect();
+  cache_free();
+}
+
 int ReplicaClient::flush(size_t offset, size_t len) {
   int r = 0;
   size_t cnt = 0;

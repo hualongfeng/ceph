@@ -281,9 +281,7 @@ void WriteLog<I>::remove_pool_file() {
     m_log_pool->close_dev();
     // used to replica
     if (m_replica_pool) {
-      m_replica_pool->replica_close();
-      m_replica_pool->disconnect();
-      m_replica_pool->cache_free();
+      m_replica_pool->close();
     }
   }
   if (m_cache_state->clean) {
