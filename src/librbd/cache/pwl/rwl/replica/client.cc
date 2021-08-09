@@ -1,6 +1,7 @@
 #include <inttypes.h>
 #include <iostream>
 #include <string>
+#include <libpmem.h>
 
 #include "Reactor.h"
 #include "EventHandler.h"
@@ -72,13 +73,25 @@ int main(int argc, const char* argv[]) {
   rpma_log_set_threshold(RPMA_LOG_THRESHOLD_AUX, RPMA_LOG_LEVEL_INFO);
 
   int r = 0;
-  auto copies = g_ceph_context->_conf->rwl_replica_copies;
-  ReplicaClient replica_client(g_ceph_context, REQUIRE_SIZE, copies, "RBD", "test");
-  r = replica_client.init_rados();
+
+  librados::Rados rados;
+  r = rados.init_with_context(g_ceph_context);
+  r |= rados.connect();
   if (r < 0) {
-    std::cerr << "rwl-replica: failed to connect to cluster: " << cpp_strerror(r) << std::endl;
-    return -r;
+    std::cout << "failed to connect to cluster: " << cpp_strerror(r) << std::endl;
+    exit(1);
   }
+  librados::IoCtx io_ctx;
+  r = rados.ioctx_create("rbd", io_ctx);
+  if (r < 0) {
+    std::cout << "failed to access pool "<< cpp_strerror(r) << std::endl;
+    exit(1);
+  }
+  std::cout << rados.get_instance_id() << std::endl;
+
+  auto copies = g_ceph_context->_conf->rwl_replica_copies;
+  ReplicaClient replica_client(g_ceph_context, REQUIRE_SIZE, copies, "RBD", "test", io_ctx);
+
   r = replica_client.init_ioctx();
   if (r < 0) {
     std::cerr << "rwl-replica: failed to access pool: "
@@ -103,7 +116,8 @@ int main(int argc, const char* argv[]) {
   char data[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890-\n";
   size_t data_size = strlen(data);
   for(size_t i = 0; i < mr_size; i+=data_size) {
-    memcpy((char*)mr_ptr + i, data, data_size);
+    //memcpy((char*)mr_ptr + i, data, data_size);
+    pmem_memcpy_nodrain((char*)mr_ptr + i, data, data_size);
   }
   r == 0 && std::cout << "---------------set_head--------------------------" << std::endl;
   r == 0 && replica_client.set_head(mr_ptr, mr_size);
@@ -113,7 +127,7 @@ int main(int argc, const char* argv[]) {
   r == 0 && std::cout << "---------------flush-----------------------------" << std::endl;
   r == 0 && std::cout << (r = replica_client.flush(0, mr_size)) << std::endl;
   r == 0 && std::cout << "---------------close_replica---------------------" << std::endl;
-  r == 0 && replica_client.replica_close();
+  //r == 0 && replica_client.replica_close();
   r == 0 && std::cout << "---------------disconnect------------------------" << std::endl;
   replica_client.disconnect();
   std::cout << "---------------cachefree-------------------------" << std::endl;

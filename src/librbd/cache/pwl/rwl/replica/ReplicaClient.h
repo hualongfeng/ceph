@@ -47,19 +47,22 @@ class ReplicaClient {
   std::condition_variable flush_var;
   bool one_flush_finish;
 
-  librados::Rados rados;
-  librados::IoCtx io_ctx;
   CephContext *_cct;
  
   ReactorPtr _reactor;
 
   std::unique_ptr<PrimaryPing> _ping;
 
+  librados::Rados rados;
+  librados::IoCtx io_ctx;
+
+  uint32_t flag{0};
+
 public:
   ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name);
+  ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name, librados::IoCtx& ioctx);
   ~ReplicaClient();
   void shutdown();
-  int init_rados();
   int init_ioctx();
   int cache_request();
   int cache_free();

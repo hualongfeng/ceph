@@ -624,9 +624,9 @@ ClientHandler::ClientHandler(CephContext *cct,
   }
 
   //TODO: make those config
-  rpma_conn_cfg_set_sq_size(cfg_ptr, 200);
-  rpma_conn_cfg_set_rq_size(cfg_ptr, 200);
-  rpma_conn_cfg_set_cq_size(cfg_ptr, 200);
+  rpma_conn_cfg_set_sq_size(cfg_ptr, 500);
+  rpma_conn_cfg_set_rq_size(cfg_ptr, 500);
+  rpma_conn_cfg_set_cq_size(cfg_ptr, 500);
   rpma_conn_cfg_set_timeout(cfg_ptr, 9000); //ms
 
   ret = rpma_conn_req_new(peer, addr.c_str(), port.c_str(), cfg_ptr, &req);

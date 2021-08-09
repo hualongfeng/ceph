@@ -534,6 +534,7 @@ void AbstractWriteLog<I>::pwl_init(Context *on_finish, DeferredContexts &later) 
 
   bool succeeded = initialize_pool(on_finish, later);
   if (!succeeded) {
+    ldout(cct, 5) << "initialize_pool failed!!!" << dendl;
     return ;
   }
 

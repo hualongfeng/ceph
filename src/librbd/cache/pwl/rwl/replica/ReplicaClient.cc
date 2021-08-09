@@ -31,6 +31,12 @@ ReplicaClient::ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, s
       _cct(cct), _reactor(std::make_shared<Reactor>(cct)),
       _ping(make_unique<PrimaryPing>(cct, io_ctx, this)) {}
 
+ReplicaClient::ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name, librados::IoCtx& ioctx)
+    : _size(size), _copies(copies), _pool_name(std::move(pool_name)), _image_name(std::move(image_name)),
+      _cct(cct), _reactor(std::make_shared<Reactor>(cct)),
+      _ping(make_unique<PrimaryPing>(cct, io_ctx, this)),
+      rados(ioctx) {}
+
 ReplicaClient::~ReplicaClient() {
   ldout(_cct, 20) << dendl;
   shutdown();
@@ -38,7 +44,6 @@ ReplicaClient::~ReplicaClient() {
 
 void ReplicaClient::shutdown() {
   _reactor->shutdown();
-  rados.shutdown();
 }
 
 int ReplicaClient::flush(size_t offset, size_t len) {
@@ -149,25 +154,9 @@ int ReplicaClient::set_head(void *head_ptr, uint64_t size) {
   return 0;
 }
 
-int ReplicaClient::init_rados() {
-  int r = 0;
-  r = rados.init_with_context(_cct);
-  if (r < 0) {
-    return r;
-  }
-
-  r = rados.connect();
-  if (r < 0) {
-    ldout(_cct, 1) << "failed to connect to cluster: " << cpp_strerror(r) << dendl;
-    return r;
-  }
-
-  return 0;
-}
-
 int ReplicaClient::init_ioctx() {
   int r = 0;
-
+  ldout(_cct, 20) << rados.get_instance_id() << dendl;
   std::string poolname = _cct->_conf.get_val<std::string>("rbd_persistent_replicated_cache_cls_pool");
   r = rados.ioctx_create(poolname.c_str(), io_ctx);
   if (r < 0) {
