@@ -310,6 +310,9 @@ if(WITH_RBD_RWL OR WITH_RBD_SSD_CACHE)
       PUBLIC pmem::pmemobj
       PRIVATE pmem::pmem)
   endif()
+  if(WITH_RBD_RWL)
+    add_subdirectory(cache/pwl/rwl/replica)
+  endif()
 
   set_target_properties(librbd_plugin_pwl_cache PROPERTIES
     OUTPUT_NAME ceph_librbd_pwl_cache
