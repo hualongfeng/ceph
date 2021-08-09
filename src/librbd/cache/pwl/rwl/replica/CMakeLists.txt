@@ -22,3 +22,15 @@ target_link_libraries(ceph-rwl-replica-server
   )
 install(TARGETS ceph-rwl-replica-server DESTINATION bin)
 
+add_executable(ceph-rwl-replica-client client.cc)
+target_link_libraries(ceph-rwl-replica-client
+  ceph_rwl_replica_lib
+  librados
+  global
+  ceph-common
+  pmem::pmem
+  rpma::rpma
+  cls_rbd_client
+  libneorados
+  )
+install(TARGETS ceph-rwl-replica-client DESTINATION bin)
