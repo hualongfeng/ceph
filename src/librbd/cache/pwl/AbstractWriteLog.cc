@@ -20,6 +20,8 @@
 #include "librbd/plugin/Api.h"
 #include <map>
 #include <vector>
+#include <filesystem>
+namespace fs = std::filesystem;
 
 #undef dout_subsys
 #define dout_subsys ceph_subsys_rbd_pwl
@@ -488,6 +490,16 @@ void AbstractWriteLog<I>::update_sync_points(std::map<uint64_t, bool> &missing_s
   }
 }
 
+static void update_log_pool_name(const std::string& path, std::string &m_log_pool_name) {
+  for (auto& p : fs::directory_iterator(path)) {
+    if (fs::is_regular_file(p.status()) && p.path().find(m_log_pool_name) != std::string::npos) {
+      m_log_pool_name = p.path();
+      break;;
+    }
+  }
+  return;
+}
+
 template <typename I>
 void AbstractWriteLog<I>::pwl_init(Context *on_finish, DeferredContexts &later) {
   CephContext *cct = m_image_ctx.cct;
@@ -506,6 +518,7 @@ void AbstractWriteLog<I>::pwl_init(Context *on_finish, DeferredContexts &later) 
         "rbd_persistent_cache_path");
     std::string pool_name = m_image_ctx.md_ctx.get_pool_name();
     m_cache_state->path = path + "/rbd-pwl." + pool_name + "." + m_image_ctx.name + ".pool";
+    update_log_pool_name(path, m_cache_state->path);
   }
 
   ldout(cct,5) << "pwl_size: " << m_cache_state->size << dendl;
