@@ -505,7 +505,7 @@ void AbstractWriteLog<I>::pwl_init(Context *on_finish, DeferredContexts &later) 
     string path = m_image_ctx.config.template get_val<string>(
         "rbd_persistent_cache_path");
     std::string pool_name = m_image_ctx.md_ctx.get_pool_name();
-    m_cache_state->path = path + "/rbd-pwl." + pool_name + "." + m_image_ctx.id + ".pool";
+    m_cache_state->path = path + "/rbd-pwl." + pool_name + "." + m_image_ctx.name + ".pool";
   }
 
   ldout(cct,5) << "pwl_size: " << m_cache_state->size << dendl;
