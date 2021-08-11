@@ -492,7 +492,7 @@ void AbstractWriteLog<I>::update_sync_points(std::map<uint64_t, bool> &missing_s
 
 static void update_log_pool_name(const std::string& path, std::string &m_log_pool_name) {
   for (auto& p : fs::directory_iterator(path)) {
-    if (fs::is_regular_file(p.status()) && p.path().find(m_log_pool_name) != std::string::npos) {
+    if (fs::is_regular_file(p.status()) && p.path().string().find(m_log_pool_name) != std::string::npos) {
       m_log_pool_name = p.path();
       break;;
     }
