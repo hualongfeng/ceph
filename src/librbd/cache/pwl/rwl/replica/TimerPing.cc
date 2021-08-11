@@ -82,18 +82,16 @@ int DaemonPing::single_ping() {
   return 0;
 }
 
-int DaemonPing::get_cache_info_from_filename(std::string filename, struct RwlCacheInfo& info) {
-  info.cache_size = fs::file_size(filename);
-  std::string::size_type found = filename.rfind('/');
-  if (found != std::string::npos) {
-    filename = filename.substr(found + 1);
-  }
+int DaemonPing::get_cache_info_from_filename(fs::path file, struct RwlCacheInfo& info) {
+  info.cache_size = fs::file_size(file);
+  std::string filename = file.filename();
+
   if (filename.compare(0, 7, "rbd-pwl") != 0) {
     return -1;
   }
 
   // find pool_name
-  found = filename.find('.');
+  std::string::size_type found = filename.find('.');
   if (found == std::string::npos) {
     return -1;
   }

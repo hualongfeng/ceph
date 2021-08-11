@@ -4,7 +4,7 @@ set(ceph_rwl_replica_files
   Reactor.cc
   Types.cc
   ReplicaClient.cc
-  TimePing.cc
+  TimerPing.cc
   )
 
 add_library(ceph_rwl_replica_lib STATIC ${ceph_rwl_replica_files})
