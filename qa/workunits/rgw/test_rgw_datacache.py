@@ -89,9 +89,10 @@ def get_radosgw_endpoint():
 
     if port == '443':
         proto = "https"
-        out = exec_cmd('hostname')
+        out = exec_cmd('hostname -I')
         hostname = get_cmd_output(out)
-        hostname = hostname + ".front.sepia.ceph.com"
+        hostname = hostname.split(" ")[0]
+#        hostname = hostname + ".front.sepia.ceph.com"
 
     endpoint = proto + "://" + hostname + ":" + port
     log.info("radosgw endpoint is: %s", endpoint)
