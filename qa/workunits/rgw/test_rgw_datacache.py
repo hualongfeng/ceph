@@ -160,6 +160,8 @@ def main():
     exec_cmd('s3cmd --access_key=%s --secret_key=%s --config=%s --host=%s mb s3://%s'
             % (ACCESS_KEY, SECRET_KEY, s3cmd_config_path, endpoint, BUCKET_NAME))
 
+    exec_cmd('sleep 1800')
+
     # put an object in the bucket
     exec_cmd('s3cmd --access_key=%s --secret_key=%s --config=%s --host=%s put %s s3://%s'
             % (ACCESS_KEY, SECRET_KEY, s3cmd_config_path, endpoint, outfile, BUCKET_NAME))
