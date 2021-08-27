@@ -70,7 +70,8 @@ private:
   void flush_op_log_entries(pwl::GenericLogOperationsVector &ops);
   template <typename V>
   void flush_pmem_buffer(V& ops);
-
+  void calc_allocated_and_cached_data(
+      std::shared_ptr<pwl::GenericLogEntry> log_entry) override;
 protected:
   using AbstractWriteLog<ImageCtxT>::m_lock;
   using AbstractWriteLog<ImageCtxT>::m_log_entries;
