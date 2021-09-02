@@ -22,10 +22,10 @@ namespace librbd::cache::pwl::rwl::replica {
 
 
 
-const int RWL_REPLICA_INIT_REQUEST        = 0x1;
+const int RWL_REPLICA_INIT_REQUEST        = 0x10;
 const int RWL_REPLICA_INIT_SUCCESSED      = 0x11;
 const int RWL_REPLICA_INIT_FAILED         = 0x12;
-const int RWL_REPLICA_FINISHED_REQUEST    = 0x2;
+const int RWL_REPLICA_FINISHED_REQUEST    = 0x20;
 const int RWL_REPLICA_FINISHED_SUCCCESSED = 0x21;
 const int RWL_REPLICA_FINISHED_FAILED     = 0x22;
 

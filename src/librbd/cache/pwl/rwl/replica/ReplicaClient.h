@@ -43,9 +43,12 @@ class ReplicaClient {
 
   std::atomic<uint64_t> _write_nums{0U}; // the number of current writing, this is, it initiate write operation, but not finished.
 
-  std::mutex flush_lock;
-  std::condition_variable flush_var;
-  bool one_flush_finish;
+  std::vector<std::pair<size_t, size_t>> writings;
+  std::mutex write_lock;
+
+  // std::mutex flush_lock;
+  // std::condition_variable flush_var;
+  // bool one_flush_finish;
 
   CephContext *_cct;
 

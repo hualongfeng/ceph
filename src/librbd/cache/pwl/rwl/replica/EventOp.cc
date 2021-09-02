@@ -402,7 +402,21 @@ RPMAHandler::RPMAHandler(CephContext *cct,
   init_send_recv_buffer();
 
   struct rpma_conn_req *req = nullptr;
-  ret = rpma_ep_next_conn_req(ep, nullptr, &req);
+  struct rpma_conn_cfg *cfg_ptr = nullptr;
+  ret = rpma_conn_cfg_new(&cfg_ptr);
+  if (ret) {
+    throw std::runtime_error("new cfg failed");
+  }
+
+  //TODO: make those config
+  rpma_conn_cfg_set_sq_size(cfg_ptr, 500);
+  rpma_conn_cfg_set_rq_size(cfg_ptr, 500);
+  rpma_conn_cfg_set_cq_size(cfg_ptr, 500);
+  rpma_conn_cfg_set_timeout(cfg_ptr, 1000); //ms
+
+  ret = rpma_ep_next_conn_req(ep, cfg_ptr, &req);
+  rpma_conn_cfg_delete(&cfg_ptr);
+  
   if (ret) {
     throw std::runtime_error("receive an incoming connection request failed.");
   }
@@ -527,9 +541,8 @@ int RPMAHandler::get_descriptor_for_write() {
                   << "image_name: " << init.info.image_name << "\n"
                   << dendl;
 
-  std::string cachefile_name("rbd-pwl." + init.info.pool_name + "." + init.info.image_name + ".pool." + std::to_string(init.info.cache_id));
   if (data_manager.get_pointer() == nullptr) {
-    data_manager.init(init.info.cache_size, _cct->_conf->rwl_replica_path + "/" + cachefile_name);
+    data_manager.init(std::move(init.info));
   }
 
   RwlReplicaInitRequestReply init_reply(RWL_REPLICA_INIT_SUCCESSED);
@@ -627,7 +640,7 @@ ClientHandler::ClientHandler(CephContext *cct,
   rpma_conn_cfg_set_sq_size(cfg_ptr, 500);
   rpma_conn_cfg_set_rq_size(cfg_ptr, 500);
   rpma_conn_cfg_set_cq_size(cfg_ptr, 500);
-  rpma_conn_cfg_set_timeout(cfg_ptr, 9000); //ms
+  rpma_conn_cfg_set_timeout(cfg_ptr, 1000); //ms
 
   ret = rpma_conn_req_new(peer, addr.c_str(), port.c_str(), cfg_ptr, &req);
   rpma_conn_cfg_delete(&cfg_ptr);

@@ -19,6 +19,8 @@
 #include "cls/rbd/cls_rbd.h"
 #include "librbd/Types.h"
 
+#include "include/rbd/librbd.hpp"
+
 
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rwl_replica
@@ -69,6 +71,13 @@ int main(int argc, const char* argv[]) {
   auto cct = global_init(nullptr, args, CEPH_ENTITY_TYPE_CLIENT,
                          CODE_ENVIRONMENT_DAEMON,
                          CINIT_FLAG_UNPRIVILEGED_DAEMON_DEFAULTS);
+
+  std::string path = g_conf().get_val<std::string>("rwl_replica_path");
+  std::stringstream err_ss;
+  g_conf().set_val("rbd_persistent_cache_path", path, &err_ss);
+  err_ss << std::endl;
+  g_conf().set_val("rwl_replica_enabled", "false", &err_ss);
+  std::cout << err_ss.str() << std::endl;
 
   if (g_conf()->daemonize) {
     global_init_daemonize(g_ceph_context);
@@ -131,8 +140,7 @@ int main(int argc, const char* argv[]) {
                             << dendl;
 
   r = rwlcache_daemoninfo(&io_ctx, d_info);
-  std::cout << "rwlcache_daemoninfo: " << r << std::endl;
-
+  ldout(g_ceph_context, 20) << "rwlcache_daemoninfo: " << r << dendl;
 
   try {
     reactor = std::make_shared<Reactor>(g_ceph_context);
@@ -144,7 +152,7 @@ int main(int argc, const char* argv[]) {
     dp->timer_ping();
     reactor->handle_events();
   } catch (std::runtime_error &e) {
-    std::cout << __FILE__ << ":" << __LINE__ << " Runtime error: " << e.what() << std::endl;
+    ldout(g_ceph_context, 1) << __FILE__ << ":" << __LINE__ << " Runtime error: " << e.what() << dendl;
   }
 
  cleanup:

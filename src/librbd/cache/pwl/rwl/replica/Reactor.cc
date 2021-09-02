@@ -34,6 +34,7 @@ Reactor::Reactor(CephContext *cct) : _stop(false), _cct(cct) {
   ldout(_cct, 20) << dendl;
   _epoll = epoll_create1(EPOLL_CLOEXEC);
   if (_epoll == -1) {
+    ldout(_cct, 1) << "epoll_create1 failed\n" << dendl;
     throw std::runtime_error("epoll_create1 failed\n");
   }
 }
@@ -97,13 +98,14 @@ void Reactor::shutdown() {
 }
 
 int Reactor::handle_events() {
+  ldout(_cct, 20) << dendl;
   int ret = 0;
   /* process epoll's events */
   struct epoll_event event;
   EventHandle *event_handle;
   while (!_stop.load()) {
     while ((ret = epoll_wait(_epoll, &event, 1 /* # of events */,
-                                0)) == 1) {
+                                100)) == 1) {
       event_handle = static_cast<EventHandle*>(event.data.ptr);
        ldout(_cct, 20) << "type: " << event_handle->type << dendl;
       event_handle->handler->handle(event_handle->type);

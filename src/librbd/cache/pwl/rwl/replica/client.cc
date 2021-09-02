@@ -89,7 +89,12 @@ int main(int argc, const char* argv[]) {
   }
   std::cout << rados.get_instance_id() << std::endl;
 
-  auto copies = g_ceph_context->_conf->rwl_replica_copies;
+  auto &copies = g_ceph_context->_conf->rwl_replica_copies;
+  // std::cout << "before copies: " << copies << std::endl;
+  // copies = 4;
+  // auto &copies1 = g_ceph_context->_conf->rwl_replica_copies;
+  // std::cout << "after copies: " << copies1 << std::endl;
+  // return 0;
   ReplicaClient replica_client(g_ceph_context, REQUIRE_SIZE, copies, "RBD", "test", io_ctx);
 
   r = replica_client.init_ioctx();
@@ -108,7 +113,7 @@ int main(int argc, const char* argv[]) {
 
   // data prepare
   bufferlist bl;
-  size_t mr_size = 1024 * 1024 * 1024; //max size, can't extend 1G byte
+  size_t mr_size = 1024 * 1024 * 128; //max size, can't extend 1G byte
   bl.append(bufferptr(mr_size));
   bl.rebuild_page_aligned();
   void* mr_ptr = bl.c_str();;
@@ -123,9 +128,18 @@ int main(int argc, const char* argv[]) {
   r == 0 && replica_client.set_head(mr_ptr, mr_size);
 
   r == 0 && std::cout << "---------------write-----------------------------" << std::endl;
-  r == 0 && std::cout << (r = replica_client.write(0, mr_size)) << std::endl;
-  r == 0 && std::cout << "---------------flush-----------------------------" << std::endl;
-  r == 0 && std::cout << (r = replica_client.flush(0, mr_size)) << std::endl;
+  int cnt = 0;
+  size_t write_size = 4096;
+  for (size_t i = 0; i < mr_size; i+=write_size) {
+    cnt++;
+    replica_client.write(i, i+write_size);
+    // std::cout << (r = replica_client.write(i, i+data_size)) << std::endl;
+    if(cnt % 20 == 0) {
+      replica_client.flush(i, i+write_size);
+      // std::cout << (r = replica_client.flush(0, mr_size)) << std::endl;
+    }
+  }
+  // r == 0 && std::cout << "---------------flush-----------------------------" << std::endl;
   r == 0 && std::cout << "---------------close_replica---------------------" << std::endl;
   //r == 0 && replica_client.replica_close();
   r == 0 && std::cout << "---------------disconnect------------------------" << std::endl;

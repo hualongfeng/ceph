@@ -19,7 +19,7 @@
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rwl_replica
 #undef dout_prefix
-#define dout_prefix *_dout << "ceph::rwl_repilca::ReplicaClient: " << this << " " \
+#define dout_prefix *_dout << "ceph::rwl_repilca::ReplicaClient: " << this << "fenghl: " \
                            << __func__ << ": "
 
 namespace librbd::cache::pwl::rwl::replica {
@@ -42,6 +42,7 @@ void ReplicaClient::shutdown() {
 }
 
 int ReplicaClient::init(void *head_ptr, uint64_t size) {
+  ldout(_cct, 20) << dendl;
   int r = 0;
   if ((r = init_ioctx()) < 0) {
     lderr(_cct) << "replica: failed to init ioctx" << dendl;
@@ -56,6 +57,7 @@ int ReplicaClient::init(void *head_ptr, uint64_t size) {
 }
 
 void ReplicaClient::close() {
+  // flush(0,_size);
   replica_close();
   disconnect();
   cache_free();
@@ -64,29 +66,46 @@ void ReplicaClient::close() {
 int ReplicaClient::flush(size_t offset, size_t len) {
   int r = 0;
   size_t cnt = 0;
+  std::vector<std::pair<size_t, size_t>> waiting_to_flush;
+  {
+    std::lock_guard locker(write_lock);
+    waiting_to_flush = std::move(writings);
+  }
+  ldout(_cct, 20) << "waiting_to_flush size: " << waiting_to_flush.size() << dendl;
   for (auto &daemon : _daemons) {
     if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
     cnt++;
-    {
-      std::lock_guard locker(flush_lock);
-      one_flush_finish = false;
-    }
-    r = daemon.client_handler->flush(offset, len, [this]() mutable {
-      {
-        std::lock_guard locker(this->flush_lock);
-        this->one_flush_finish = true;
+    for (auto one_flush : waiting_to_flush) {
+      ldout(_cct, 20) << one_flush.first << ":" << one_flush.second << dendl;
+      // {
+      //   std::lock_guard locker(flush_lock);
+      //   one_flush_finish = false;
+      // }
+      bool one_flush_finish = false;
+      std::mutex flush_lock;
+      std::condition_variable flush_var;
+      r = daemon.client_handler->flush(one_flush.first, one_flush.second, [this, one_flush, 
+                                                &one_flush_finish, &flush_lock, &flush_var]() mutable {
+        {
+          // std::lock_guard locker(flush_lock);
+          one_flush_finish = true;
+          // flush_var.notify_one();
+        }
+        ldout(_cct, 20) << "flush finish " << one_flush.first << ":" << one_flush.second << dendl;
+      });
+      if (r != 0) {
+        ldout(_cct, 1) << "rpma_flush error: " << r << dendl;
+        return r;
       }
-      this->flush_var.notify_one();
-    });
-    if (r != 0) {
-      ldout(_cct, 1) << "rpma_flush error: " << r << dendl;
-      return r;
-    }
-    std::unique_lock locker(flush_lock);
-    using namespace std::chrono_literals;
-    flush_var.wait_for(locker, 30s,[this]{return this->one_flush_finish;});
-    if (one_flush_finish != true) {
-      return -1;
+      // std::unique_lock locker(flush_lock);
+      // using namespace std::chrono_literals;
+      // flush_var.wait_for(locker, 30s,[this]{return this->one_flush_finish;});
+      // if (one_flush_finish != true) {
+      //   ldout(_cct, 1) << "not finish " << one_flush.first << ":" << one_flush.second << dendl;
+      //   //return -1;
+      // }
+      // flush_var.wait(locker, [this, &one_flush_finish]{return one_flush_finish;});
+      while (one_flush_finish == false);
     }
   }
   ldout(_cct, 1) << "_write_nums: " << _write_nums.load() << dendl;
@@ -94,20 +113,25 @@ int ReplicaClient::flush(size_t offset, size_t len) {
 }
 
 int ReplicaClient::write(size_t offset, size_t len) {
+ ldout(_cct, 20) << offset << ":" << len << dendl;
   int r = 0;
   size_t cnt = 0;
   for (auto &daemon : _daemons) {
     if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
     cnt++;
     _write_nums.fetch_add(1);
-    r = daemon.client_handler->write(offset, len, [this]() mutable {
-      ldout(this->_cct, 20) << "write success" << dendl;
+    r = daemon.client_handler->write(offset, len, [this, offset, len]() mutable {
+      ldout(this->_cct, 20) << "write success: " << offset << "," << len << dendl;
       this->_write_nums.fetch_sub(1);
     });
     if (r != 0) {
       ldout(_cct, 1) << "rpma_write error: " << r << dendl;
       return r;
     }
+  }
+  {
+    std::lock_guard locker(write_lock);
+    writings.push_back(std::make_pair(offset, len));
   }
   return (cnt == _daemons.size() ? 0 : -1);
 }

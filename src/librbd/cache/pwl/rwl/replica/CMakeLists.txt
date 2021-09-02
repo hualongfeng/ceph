@@ -13,6 +13,7 @@ add_executable(ceph-rwl-replica-server server.cc)
 target_link_libraries(ceph-rwl-replica-server
   ceph_rwl_replica_lib
   librados
+  librbd
   global
   ceph-common
   pmem::pmem
@@ -26,6 +27,7 @@ add_executable(ceph-rwl-replica-client client.cc)
 target_link_libraries(ceph-rwl-replica-client
   ceph_rwl_replica_lib
   librados
+  librbd
   global
   ceph-common
   pmem::pmem
