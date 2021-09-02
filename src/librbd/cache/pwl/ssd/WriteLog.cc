@@ -682,6 +682,8 @@ bool WriteLog<I>::retire_entries(const unsigned long int frees_per_tx) {
           first_valid_entry = first_valid_entry % this->m_log_pool_size +
               DATA_RING_BUFFER_OFFSET;
         }
+       if (control_blocks.count(first_valid_entry) == 0)
+         ceph_assert("invalid control_block" == 0);
       } else {
         break;
       }
@@ -845,6 +847,7 @@ void WriteLog<I>::write_log_entries(GenericLogEntriesVector log_entries,
     persist_log_entries.push_back(log_entry->ram_entry);
   }
 
+  control_blocks.insert(*pos);
   //aio write
   bufferlist bl;
   encode(persist_log_entries, bl);

@@ -104,6 +104,7 @@ private:
   pwl::WriteLogPoolRoot pool_root;
   Builder<This> *m_builderobj;
 
+  std::set<uint64_t> control_blocks;
   Builder<This>* create_builder();
   int create_and_open_bdev();
   void load_existing_entries(pwl::DeferredContexts &later);
