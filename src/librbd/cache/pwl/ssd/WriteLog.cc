@@ -682,7 +682,7 @@ bool WriteLog<I>::retire_entries(const unsigned long int frees_per_tx) {
           first_valid_entry = first_valid_entry % this->m_log_pool_size +
               DATA_RING_BUFFER_OFFSET;
         }
-       if (control_blocks.count(first_valid_entry) == 0)
+       if ((!control_blocks.empty()) && (control_blocks.count(first_valid_entry) == 0))
          ceph_assert("invalid control_block" == 0);
       } else {
         break;
