@@ -227,7 +227,7 @@ int WriteLog<I>::append_op_log_entries(GenericLogOperations &ops)
   pmem_drain();
   if (m_replica_pool) {
     //maybe need to correct the offset and length, now we don't consider it.
-    //m_replica_pool->flush(0, MAX_ROOT_LEN);
+    m_replica_pool->flush(0, MAX_ROOT_LEN);
   }
 
   /*
@@ -285,7 +285,7 @@ void WriteLog<I>::remove_pool_file() {
     m_log_pool->close_dev();
     // used to replica
     if (m_replica_pool) {
-      //m_replica_pool->close();
+      m_replica_pool->close();
     }
   }
   if (m_cache_state->clean) {
@@ -962,7 +962,7 @@ void WriteLog<I>::flush_pmem_buffer(V& ops)
   pmem_drain();
   if (m_replica_pool) {
     //maybe need to correct the offset and length, now we don't consider it.
-    //m_replica_pool->flush(0, m_log_pool->get_mapped_len());
+    m_replica_pool->flush(0, m_log_pool->get_mapped_len());
   }
 
   now = ceph_clock_now();

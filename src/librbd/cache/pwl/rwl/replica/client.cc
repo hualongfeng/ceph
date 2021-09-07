@@ -95,7 +95,7 @@ int main(int argc, const char* argv[]) {
   // auto &copies1 = g_ceph_context->_conf->rwl_replica_copies;
   // std::cout << "after copies: " << copies1 << std::endl;
   // return 0;
-  ReplicaClient replica_client(g_ceph_context, REQUIRE_SIZE, copies, "RBD", "test", io_ctx);
+  ReplicaClient replica_client(g_ceph_context, REQUIRE_SIZE, copies, "rbd", "test", io_ctx);
 
   r = replica_client.init_ioctx();
   if (r < 0) {
@@ -113,7 +113,7 @@ int main(int argc, const char* argv[]) {
 
   // data prepare
   bufferlist bl;
-  size_t mr_size = 1024 * 1024 * 128; //max size, can't extend 1G byte
+  size_t mr_size = 1024 * 1024 * 1024; //max size, can't extend 1G byte
   bl.append(bufferptr(mr_size));
   bl.rebuild_page_aligned();
   void* mr_ptr = bl.c_str();;
@@ -121,21 +121,24 @@ int main(int argc, const char* argv[]) {
   char data[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890-\n";
   size_t data_size = strlen(data);
   for(size_t i = 0; i < mr_size; i+=data_size) {
-    //memcpy((char*)mr_ptr + i, data, data_size);
-    pmem_memcpy_nodrain((char*)mr_ptr + i, data, data_size);
+    memcpy((char*)mr_ptr + i, data, data_size);
+    //pmem_memcpy_nodrain((char*)mr_ptr + i, data, data_size);
   }
   r == 0 && std::cout << "---------------set_head--------------------------" << std::endl;
   r == 0 && replica_client.set_head(mr_ptr, mr_size);
 
   r == 0 && std::cout << "---------------write-----------------------------" << std::endl;
   int cnt = 0;
-  size_t write_size = 4096;
-  for (size_t i = 0; i < mr_size; i+=write_size) {
+  replica_client.write(0, mr_size);
+  replica_client.flush(0, mr_size);
+  std::cout << "---------------first write flush finshed-------------------" << std::endl;
+  size_t write_size = 512;
+  for (size_t i = 0; i + write_size < mr_size; i+=write_size) {
     cnt++;
-    replica_client.write(i, i+write_size);
+    replica_client.write(i, write_size);
     // std::cout << (r = replica_client.write(i, i+data_size)) << std::endl;
     if(cnt % 20 == 0) {
-      replica_client.flush(i, i+write_size);
+      replica_client.flush(i, write_size);
       // std::cout << (r = replica_client.flush(0, mr_size)) << std::endl;
     }
   }

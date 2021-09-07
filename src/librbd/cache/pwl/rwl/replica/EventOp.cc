@@ -265,7 +265,7 @@ int ConnectionHandler::handle_connection_event() {
 }
 
 int ConnectionHandler::handle_completion() {
-  ldout(_cct, 10) << dendl;
+  // ldout(_cct, 10) << dendl;
   int ret = 0;
 
   /* prepare detected completions for processing */
@@ -319,22 +319,22 @@ int ConnectionHandler::handle_completion() {
     return ret;
   }
 
-  if (cmpl.op == RPMA_OP_RECV) {
-    ldout(_cct, 10) << "RPMA_OP_RECV" << dendl;
-  } else if ( cmpl.op == RPMA_OP_SEND) {
-    ldout(_cct, 10) << "RPMA_OP_SEND" << dendl;
-  } else if (cmpl.op == RPMA_OP_WRITE) {
-    ldout(_cct, 10) << "RPMA_OP_WRITE" << dendl;
-  } else if (cmpl.op == RPMA_OP_FLUSH) {
-    ldout(_cct, 10) << "RPMA_OP_FLUSH" << dendl;
-  } else if (cmpl.op == RPMA_OP_READ) {
-    ldout(_cct, 10) << "RPMA_OP_READ" << dendl;
-  } else {
-    ldout(_cct, 5) << "operation: "
-                   << cmpl.op
-                   << ". Shouldn't step in this."
-                   << dendl;
-  }
+  // if (cmpl.op == RPMA_OP_RECV) {
+  //   ldout(_cct, 10) << "RPMA_OP_RECV" << dendl;
+  // } else if ( cmpl.op == RPMA_OP_SEND) {
+  //   ldout(_cct, 10) << "RPMA_OP_SEND" << dendl;
+  // } else if (cmpl.op == RPMA_OP_WRITE) {
+  //   ldout(_cct, 10) << "RPMA_OP_WRITE" << dendl;
+  // } else if (cmpl.op == RPMA_OP_FLUSH) {
+  //   ldout(_cct, 10) << "RPMA_OP_FLUSH" << dendl;
+  // } else if (cmpl.op == RPMA_OP_READ) {
+  //   ldout(_cct, 10) << "RPMA_OP_READ" << dendl;
+  // } else {
+  //   ldout(_cct, 5) << "operation: "
+  //                  << cmpl.op
+  //                  << ". Shouldn't step in this."
+  //                  << dendl;
+  // }
 
   if (cmpl.op_context != nullptr) {
     auto op_func = std::unique_ptr<RpmaOp>{static_cast<RpmaOp*>(const_cast<void *>(cmpl.op_context))};
@@ -409,10 +409,10 @@ RPMAHandler::RPMAHandler(CephContext *cct,
   }
 
   //TODO: make those config
-  rpma_conn_cfg_set_sq_size(cfg_ptr, 500);
-  rpma_conn_cfg_set_rq_size(cfg_ptr, 500);
-  rpma_conn_cfg_set_cq_size(cfg_ptr, 500);
-  rpma_conn_cfg_set_timeout(cfg_ptr, 1000); //ms
+  rpma_conn_cfg_set_sq_size(cfg_ptr, 50);
+  rpma_conn_cfg_set_rq_size(cfg_ptr, 50);
+  rpma_conn_cfg_set_cq_size(cfg_ptr, 50);
+  rpma_conn_cfg_set_timeout(cfg_ptr, 100); //ms
 
   ret = rpma_ep_next_conn_req(ep, cfg_ptr, &req);
   rpma_conn_cfg_delete(&cfg_ptr);
@@ -637,10 +637,10 @@ ClientHandler::ClientHandler(CephContext *cct,
   }
 
   //TODO: make those config
-  rpma_conn_cfg_set_sq_size(cfg_ptr, 500);
-  rpma_conn_cfg_set_rq_size(cfg_ptr, 500);
-  rpma_conn_cfg_set_cq_size(cfg_ptr, 500);
-  rpma_conn_cfg_set_timeout(cfg_ptr, 1000); //ms
+  rpma_conn_cfg_set_sq_size(cfg_ptr, 50);
+  rpma_conn_cfg_set_rq_size(cfg_ptr, 50);
+  rpma_conn_cfg_set_cq_size(cfg_ptr, 50);
+  rpma_conn_cfg_set_timeout(cfg_ptr, 100); //ms
 
   ret = rpma_conn_req_new(peer, addr.c_str(), port.c_str(), cfg_ptr, &req);
   rpma_conn_cfg_delete(&cfg_ptr);
@@ -802,6 +802,7 @@ int ClientHandler::disconnect() {
 
 int ClientHandler::set_head(void *head_ptr, uint64_t size) {
   data_header = head_ptr;
+  data_size = size;
   rpma_mr_local *mr{nullptr};
   int ret = rpma_mr_reg(_peer.get(), head_ptr, size, RPMA_MR_USAGE_WRITE_SRC, &mr);
   if (ret) {
@@ -812,20 +813,12 @@ int ClientHandler::set_head(void *head_ptr, uint64_t size) {
 }
 
 int ClientHandler::write(size_t offset,
-                         size_t len,
-                         std::function<void()> callback) {
+                         size_t len) {
   ceph_assert(data_mr);
+  ceph_assert(offset + len <= data_size);
   ceph_assert(len <= 1024 * 1024 * 1024);
-  std::unique_ptr<RpmaWrite> uwrite = std::make_unique<RpmaWrite>(callback);
-
-  int ret = (*uwrite)(_conn.get(), _image_mr, offset, data_mr.get(), offset, len, RPMA_F_COMPLETION_ALWAYS, uwrite.get());
-  if (ret == 0) {
-    {
-      std::lock_guard locker{callback_lock};
-      callback_table.insert(uwrite.get());
-    }
-    uwrite.release();
-  }
+  RpmaWrite write;
+  int ret = write(_conn.get(), _image_mr, offset, data_mr.get(), offset, len, RPMA_F_COMPLETION_ON_ERROR, nullptr);
   return ret;
 }
 

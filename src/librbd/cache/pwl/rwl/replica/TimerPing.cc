@@ -170,7 +170,7 @@ PrimaryPing::C_Ping::~C_Ping() {}
 void PrimaryPing::C_Ping::finish(int r) {
   bool ok = pping->_client->single_ping();
   if (ok) {
-    pping->_ping_timer.add_event_after(5, new C_Ping(pping));
+    pping->_ping_timer.add_event_after(20, new C_Ping(pping));
   } else {
     pping->_client->shutdown();
   }

@@ -58,7 +58,7 @@ public:
 
 class RpmaWrite : public RpmaOp {
 public:
-  RpmaWrite(std::function<void()> f) : RpmaOp(f) {}
+  RpmaWrite(std::function<void()> f = nullptr) : RpmaOp(f) {}
   ~RpmaWrite() {}
 
   int operator() ( struct rpma_conn *conn,
@@ -75,7 +75,7 @@ public:
 
 class RpmaFlush : public RpmaOp {
 public:
-  RpmaFlush(std::function<void()> f) : RpmaOp(f) {}
+  RpmaFlush(std::function<void()> f = nullptr) : RpmaOp(f) {}
   ~RpmaFlush() {}
 
   int operator() ( struct rpma_conn *conn,

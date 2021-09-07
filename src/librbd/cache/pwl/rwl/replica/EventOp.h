@@ -186,11 +186,10 @@ public:
   int disconnect();
 
   int write(size_t offset,
-            size_t len,
-            std::function<void()> callback);
+            size_t len);
   int flush(size_t offset,
             size_t len,
-            std::function<void()> callback);
+            std::function<void()> callback = nullptr);
   int write_atomic(std::function<void()> callback);
   int get_remote_descriptor();
   int prepare_for_send();
@@ -203,6 +202,7 @@ private:
   std::string _port;
 
   void *data_header;
+  size_t data_size;
   unique_rpma_mr_ptr data_mr;
 
   size_t _image_size;

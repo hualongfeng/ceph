@@ -53,6 +53,8 @@ int ReplicaClient::init(void *head_ptr, uint64_t size) {
     return r;
   }
   set_head(head_ptr, size);
+  write(0, size);
+  flush(0, size);
   return 0;
 }
 
@@ -71,12 +73,12 @@ int ReplicaClient::flush(size_t offset, size_t len) {
     std::lock_guard locker(write_lock);
     waiting_to_flush = std::move(writings);
   }
-  ldout(_cct, 20) << "waiting_to_flush size: " << waiting_to_flush.size() << dendl;
+  // ldout(_cct, 20) << "waiting_to_flush size: " << waiting_to_flush.size() << dendl;
   for (auto &daemon : _daemons) {
     if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
     cnt++;
     for (auto one_flush : waiting_to_flush) {
-      ldout(_cct, 20) << one_flush.first << ":" << one_flush.second << dendl;
+      // ldout(_cct, 20) << one_flush.first << ":" << one_flush.second << dendl;
       // {
       //   std::lock_guard locker(flush_lock);
       //   one_flush_finish = false;
@@ -87,28 +89,29 @@ int ReplicaClient::flush(size_t offset, size_t len) {
       r = daemon.client_handler->flush(one_flush.first, one_flush.second, [this, one_flush, 
                                                 &one_flush_finish, &flush_lock, &flush_var]() mutable {
         {
-          // std::lock_guard locker(flush_lock);
+          std::lock_guard locker(flush_lock);
           one_flush_finish = true;
-          // flush_var.notify_one();
+          flush_var.notify_one();
+          _write_nums.fetch_sub(1);
         }
-        ldout(_cct, 20) << "flush finish " << one_flush.first << ":" << one_flush.second << dendl;
+        // ldout(_cct, 20) << "flush finish " << one_flush.first << ":" << one_flush.second << dendl;
       });
       if (r != 0) {
         ldout(_cct, 1) << "rpma_flush error: " << r << dendl;
         return r;
       }
-      // std::unique_lock locker(flush_lock);
+      std::unique_lock locker(flush_lock);
       // using namespace std::chrono_literals;
       // flush_var.wait_for(locker, 30s,[this]{return this->one_flush_finish;});
       // if (one_flush_finish != true) {
       //   ldout(_cct, 1) << "not finish " << one_flush.first << ":" << one_flush.second << dendl;
       //   //return -1;
       // }
-      // flush_var.wait(locker, [this, &one_flush_finish]{return one_flush_finish;});
-      while (one_flush_finish == false);
+      flush_var.wait(locker, [this, &one_flush_finish]{return one_flush_finish;});
+      //while (one_flush_finish == false);
     }
   }
-  ldout(_cct, 1) << "_write_nums: " << _write_nums.load() << dendl;
+  // ldout(_cct, 1) << "_write_nums: " << _write_nums.load() << dendl;
   return (cnt == _daemons.size() ? 0 : -1);
 }
 
@@ -120,10 +123,7 @@ int ReplicaClient::write(size_t offset, size_t len) {
     if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
     cnt++;
     _write_nums.fetch_add(1);
-    r = daemon.client_handler->write(offset, len, [this, offset, len]() mutable {
-      ldout(this->_cct, 20) << "write success: " << offset << "," << len << dendl;
-      this->_write_nums.fetch_sub(1);
-    });
+    r = daemon.client_handler->write(offset, len);
     if (r != 0) {
       ldout(_cct, 1) << "rpma_write error: " << r << dendl;
       return r;
@@ -275,6 +275,7 @@ int ReplicaClient::cache_request() {
     r = daemon.client_handler->wait_established();
     if (r < 0) {
       // if there has connection failed, all should be stopped.
+      ldout(_cct, 10) << "wait_established failed!" << dendl;
       disconnect();
       break;
     }
