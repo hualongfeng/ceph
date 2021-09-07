@@ -29,7 +29,7 @@ using namespace librbd::cls_client;
 ReplicaClient::ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name, librados::IoCtx& ioctx)
     : _size(size), _copies(copies), _pool_name(std::move(pool_name)), _image_name(std::move(image_name)),
       _cct(cct), _reactor(std::make_shared<Reactor>(cct)),
-      _ping(make_unique<PrimaryPing>(cct, io_ctx, this)),
+      _ping(std::make_unique<PrimaryPing>(cct, io_ctx, this)),
       rados(ioctx) {}
 
 ReplicaClient::~ReplicaClient() {
