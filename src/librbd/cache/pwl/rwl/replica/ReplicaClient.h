@@ -46,9 +46,16 @@ class ReplicaClient {
   std::vector<std::pair<size_t, size_t>> writings;
   std::mutex write_lock;
 
-  // std::mutex flush_lock;
-  // std::condition_variable flush_var;
-  // bool one_flush_finish;
+  std::mutex flush_lock;
+  std::condition_variable flushed_var;
+  std::condition_variable flush_available_var;
+  enum FlushStatus{
+    FLUSH_UNFINISH_UNAVAILABLE = 0x00,
+    FLUSH_FINSHED              = 0x01,
+    FLUSH_AVAILABLE            = 0x10,
+    FLUSH_INIT                 = FLUSH_AVAILABLE
+  };
+  enum FlushStatus flush_status{FLUSH_INIT};
 
   CephContext *_cct;
 
@@ -61,12 +68,16 @@ class ReplicaClient {
 
   uint32_t flag{0};
 
-public:
+ public:
   ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name, librados::IoCtx& ioctx);
   ~ReplicaClient();
-  void shutdown();
+  int write(size_t offset, size_t len);
+  int flush();
   int init(void *head_ptr, uint64_t size);
   void close();
+
+ public:
+  void shutdown();
   int init_ioctx();
   int cache_request();
   int cache_free();
@@ -74,8 +85,7 @@ public:
   int set_head(void *head_ptr, uint64_t size);
   int replica_init();
   int replica_close();
-  int write(size_t offset, size_t len);
-  int flush(size_t offset, size_t len);
+
   bool single_ping();
 };
 

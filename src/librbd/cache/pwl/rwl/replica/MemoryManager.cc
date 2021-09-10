@@ -3,9 +3,9 @@
 //
 
 #include "MemoryManager.h"
-#include <unistd.h>
 #include <iostream>
 #include <libpmem.h>
+#include <filesystem>
 
 #include "common/dout.h"
 #include "include/int_types.h"
@@ -18,6 +18,8 @@
 #undef dout_prefix
 #define dout_prefix *_dout << "ceph::rwl_repilca::MemoryManager " << ": " << this << " " \
                            << __func__ << ": "
+
+namespace fs = std::filesystem;
 
 namespace librbd::cache::pwl::rwl::replica {
 
@@ -54,7 +56,7 @@ int MemoryManager::close_and_remove() {
     free(_data);
   }
   _data = nullptr;
-  return remove(_path.c_str());
+  return fs::remove(_path);
 }
 
 MemoryManager::~MemoryManager() {
@@ -81,7 +83,7 @@ void* MemoryManager::get_memory_from_pmem(std::string &path) {
   }
   size_t len;
   int is_pmem;
-  if (access(path.c_str(), F_OK) == 0) {
+  if (fs::exists(path)) {
     _data = pmem_map_file(path.c_str(), 0, 0, 0600, &len, &is_pmem);
   }
   else {

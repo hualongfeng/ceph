@@ -838,5 +838,15 @@ int ClientHandler::flush(size_t offset,
   return ret;
 }
 
+// a sequence of RDMA Write operations is followed by one RDMA Read operation
+// when the Initiator software inserts a durability point (RDMA Read address and length does not matter).
+// The RDMA Read is sent on the same connection as all of the previous RDMA Writes.
+//
+// In this method, non-allocating Writes ensure that data reach a memory controller
+// as soon as they are pushed out from the NIC—what is ensured by RDMA Read and PCIe Read fencing mechanism.
+// https://software.intel.com/content/www/us/en/develop/articles/persistent-memory-replication-over-traditional-rdma-part-1-understanding-remote-persistent.html
+int ClientHandler::flush(std::function<void()> callback) {
+  return flush(0, data_size, callback);
+}
 
 } //namespace ceph::librbd::cache::pwl::rwl::replica

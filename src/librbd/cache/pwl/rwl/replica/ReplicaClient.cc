@@ -54,84 +54,61 @@ int ReplicaClient::init(void *head_ptr, uint64_t size) {
   }
   set_head(head_ptr, size);
   write(0, size);
-  flush(0, size);
+  flush();
   return 0;
 }
 
 void ReplicaClient::close() {
-  // flush(0,_size);
+  ldout(_cct, 20) << dendl;
+  flush();
   replica_close();
   disconnect();
   cache_free();
 }
 
-int ReplicaClient::flush(size_t offset, size_t len) {
+int ReplicaClient::flush() {
   int r = 0;
   size_t cnt = 0;
-  std::vector<std::pair<size_t, size_t>> waiting_to_flush;
-  {
-    std::lock_guard locker(write_lock);
-    waiting_to_flush = std::move(writings);
-  }
-  // ldout(_cct, 20) << "waiting_to_flush size: " << waiting_to_flush.size() << dendl;
   for (auto &daemon : _daemons) {
     if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
     cnt++;
-    for (auto one_flush : waiting_to_flush) {
-      // ldout(_cct, 20) << one_flush.first << ":" << one_flush.second << dendl;
-      // {
-      //   std::lock_guard locker(flush_lock);
-      //   one_flush_finish = false;
-      // }
-      bool one_flush_finish = false;
-      std::mutex flush_lock;
-      std::condition_variable flush_var;
-      r = daemon.client_handler->flush(one_flush.first, one_flush.second, [this, one_flush, 
-                                                &one_flush_finish, &flush_lock, &flush_var]() mutable {
+    {
+      std::unique_lock locker(flush_lock);
+      flush_available_var.wait(locker, [this]{return this->flush_status & FLUSH_AVAILABLE;});
+      flush_status = FLUSH_UNFINISH_UNAVAILABLE;
+      r = daemon.client_handler->flush([this]() mutable {
         {
           std::lock_guard locker(flush_lock);
-          one_flush_finish = true;
-          flush_var.notify_one();
-          _write_nums.fetch_sub(1);
+          flush_status = FLUSH_FINSHED;
+          flushed_var.notify_one();
         }
-        // ldout(_cct, 20) << "flush finish " << one_flush.first << ":" << one_flush.second << dendl;
+        ldout(_cct, 20) << "flush finished " << dendl;
       });
       if (r != 0) {
         ldout(_cct, 1) << "rpma_flush error: " << r << dendl;
         return r;
       }
-      std::unique_lock locker(flush_lock);
-      // using namespace std::chrono_literals;
-      // flush_var.wait_for(locker, 30s,[this]{return this->one_flush_finish;});
-      // if (one_flush_finish != true) {
-      //   ldout(_cct, 1) << "not finish " << one_flush.first << ":" << one_flush.second << dendl;
-      //   //return -1;
-      // }
-      flush_var.wait(locker, [this, &one_flush_finish]{return one_flush_finish;});
-      //while (one_flush_finish == false);
     }
+    std::unique_lock locker(flush_lock);
+    flushed_var.wait(locker, [this]{return this->flush_status & FLUSH_FINSHED;});
+    flush_status = FLUSH_AVAILABLE;
+    flush_available_var.notify_one();
   }
-  // ldout(_cct, 1) << "_write_nums: " << _write_nums.load() << dendl;
   return (cnt == _daemons.size() ? 0 : -1);
 }
 
 int ReplicaClient::write(size_t offset, size_t len) {
- ldout(_cct, 20) << offset << ":" << len << dendl;
+  ldout(_cct, 20) << offset << ":" << len << dendl;
   int r = 0;
   size_t cnt = 0;
   for (auto &daemon : _daemons) {
     if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
     cnt++;
-    _write_nums.fetch_add(1);
     r = daemon.client_handler->write(offset, len);
     if (r != 0) {
       ldout(_cct, 1) << "rpma_write error: " << r << dendl;
       return r;
     }
-  }
-  {
-    std::lock_guard locker(write_lock);
-    writings.push_back(std::make_pair(offset, len));
   }
   return (cnt == _daemons.size() ? 0 : -1);
 }

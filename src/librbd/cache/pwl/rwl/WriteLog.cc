@@ -78,12 +78,11 @@ void WriteLog<I>::persist_pmem_root() {
                     get_root_crc_len(pool_root));
   pool_root->crc = crc;
   if (m_replica_pool) {
-        m_replica_pool->write(offset, MAX_ROOT_LEN);
+    m_replica_pool->write(offset, MAX_ROOT_LEN);
   }
   pmem_persist(pool_root, MAX_ROOT_LEN);
-  ldout(m_image_ctx.cct, 20) << "fenghl:" << offset << ":" << MAX_ROOT_LEN << dendl;
   if (m_replica_pool) {
-        m_replica_pool->flush(offset, MAX_ROOT_LEN);
+    m_replica_pool->flush();
   }
   ++m_write_num;
 }
@@ -226,8 +225,7 @@ int WriteLog<I>::append_op_log_entries(GenericLogOperations &ops)
   /* Drain once for all */
   pmem_drain();
   if (m_replica_pool) {
-    //maybe need to correct the offset and length, now we don't consider it.
-    m_replica_pool->flush(0, MAX_ROOT_LEN);
+    m_replica_pool->flush();
   }
 
   /*
@@ -270,8 +268,6 @@ void WriteLog<I>::flush_op_log_entries(GenericLogOperationsVector &ops)
                              << dendl;
   pmem_flush(ops.front()->get_log_entry()->cache_entry,
              ops.size() * sizeof(*(ops.front()->get_log_entry()->cache_entry)));
-  ldout(m_image_ctx.cct, 20) << "fenghl:" << (size_t)((char*)(ops.front()->get_log_entry()->cache_entry) - m_log_pool->get_head_addr())
-                             << ":" << ops.size() * sizeof(*(ops.front()->get_log_entry()->cache_entry)) << dendl;
   if (m_replica_pool) {
     m_replica_pool->write((size_t)((char*)(ops.front()->get_log_entry()->cache_entry) - m_log_pool->get_head_addr()),
                           ops.size() * sizeof(*(ops.front()->get_log_entry()->cache_entry)));
@@ -393,7 +389,6 @@ bool WriteLog<I>::initialize_pool(Context *on_finish, pwl::DeferredContexts &lat
       if (m_replica_pool) {
         m_replica_pool->write(0, MAX_ROOT_LEN + MAX_ROOT_LEN + sizeof(struct WriteLogCacheEntry) * num_small_writes);
       }
-      ldout(m_image_ctx.cct, 20) << "fenghl:" << 0 << ":" << MAX_ROOT_LEN + MAX_ROOT_LEN + sizeof(struct WriteLogCacheEntry) * num_small_writes << dendl;
       m_log_pool->init_data_bit(FIRST_ENTRY_OFFSET +
           sizeof(struct WriteLogCacheEntry) * num_small_writes);
       /* update other run time metadata */
@@ -402,7 +397,7 @@ bool WriteLog<I>::initialize_pool(Context *on_finish, pwl::DeferredContexts &lat
       ++m_write_num;
       pmem_drain();
       if (m_replica_pool) {
-        m_replica_pool->flush(0, MAX_ROOT_LEN);
+        m_replica_pool->flush();
       }
     }
   } else {
@@ -950,8 +945,6 @@ void WriteLog<I>::flush_pmem_buffer(V& ops)
     if(operation->is_writing_op()) {
       auto log_entry = static_pointer_cast<WriteLogEntry>(operation->get_log_entry());
       pmem_flush(log_entry->cache_buffer, log_entry->write_bytes());
-      ldout(m_image_ctx.cct, 20) << "fenghl:" << (size_t)(log_entry->cache_buffer - m_log_pool->get_head_addr())
-                                 << ":" << log_entry->write_bytes() << dendl;
       if (m_replica_pool) {
         m_replica_pool->write((size_t)(log_entry->cache_buffer - m_log_pool->get_head_addr()), log_entry->write_bytes());
       }
@@ -962,7 +955,7 @@ void WriteLog<I>::flush_pmem_buffer(V& ops)
   pmem_drain();
   if (m_replica_pool) {
     //maybe need to correct the offset and length, now we don't consider it.
-    m_replica_pool->flush(0, m_log_pool->get_mapped_len());
+    m_replica_pool->flush();
   }
 
   now = ceph_clock_now();

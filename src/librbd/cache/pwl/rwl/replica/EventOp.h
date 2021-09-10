@@ -54,7 +54,7 @@ public:
 class EventHandlerInterface : public EventHandler {
 public:
   EventHandlerInterface(CephContext *cct, std::weak_ptr<Reactor> reactor_ptr): _reactor_manager(reactor_ptr), _cct(cct) {}
-  ~EventHandlerInterface() {}
+  virtual ~EventHandlerInterface() {}
   virtual const char* name() const = 0;
   virtual int register_self() = 0;
   virtual int remove_self() = 0;
@@ -71,7 +71,7 @@ public:
                   const std::string& port,
                   const std::weak_ptr<Reactor> reactor_manager);
 
-  ~AcceptorHandler();
+  virtual ~AcceptorHandler();
   AcceptorHandler(const AcceptorHandler &) = delete;
   AcceptorHandler& operator=(const AcceptorHandler &) = delete;
 
@@ -100,7 +100,7 @@ private:
 class ConnectionHandler : public EventHandlerInterface {
 public:
   ConnectionHandler(CephContext *cct, const std::weak_ptr<Reactor> reactor_manager);
-  ~ConnectionHandler();
+  virtual ~ConnectionHandler();
 
   // Hook method that handles the connection.
   virtual int handle(EventType et) override;
@@ -154,7 +154,7 @@ public:
               std::shared_ptr<struct rpma_peer> peer,
               struct rpma_ep *ep,
               const std::weak_ptr<Reactor> reactor_manager);
-  ~RPMAHandler();
+  virtual ~RPMAHandler();
   virtual int register_self() override;
   virtual int remove_self() override;
   virtual const char* name() const override { return "RPMAHandler"; }
@@ -177,7 +177,7 @@ public:
                 const std::string& port,
                 const std::weak_ptr<Reactor> reactor_manager);
 
-  ~ClientHandler();
+  virtual ~ClientHandler();
   ClientHandler(const ClientHandler &) = delete;
   ClientHandler& operator=(const ClientHandler &) = delete;
   virtual int register_self() override;
@@ -190,6 +190,7 @@ public:
   int flush(size_t offset,
             size_t len,
             std::function<void()> callback = nullptr);
+  int flush(std::function<void()> callback = nullptr);
   int write_atomic(std::function<void()> callback);
   int get_remote_descriptor();
   int prepare_for_send();
