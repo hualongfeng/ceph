@@ -106,6 +106,10 @@ int Reactor::handle_events() {
   while (!_stop.load()) {
     while ((ret = epoll_wait(_epoll, &event, 1 /* # of events */,
                                 100)) == 1) {
+      if (_stop.load()) {
+        ldout(_cct, 10) << "There should stop!!!" << dendl;
+        break;
+      }
       event_handle = static_cast<EventHandle*>(event.data.ptr);
       // ldout(_cct, 20) << "type: " << event_handle->type << dendl;
       event_handle->handler->handle(event_handle->type);
