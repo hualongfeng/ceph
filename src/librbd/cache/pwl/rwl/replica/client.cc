@@ -17,6 +17,18 @@
 #include "global/global_init.h"
 #include "global/signal_handler.h"
 
+#define LOG(format, ...) ({\
+    struct timeval _tv;\
+    gettimeofday(&_tv, NULL);\
+    struct tm _now_time;\
+    time_t _time_seconds = _tv.tv_sec;\
+    localtime_r(&_time_seconds, &_now_time);\
+    char _buf[128] = {0};\
+    size_t _len = strftime(_buf, 128, "%Y-%m-%d %H:%M:%S", &_now_time);\
+    snprintf(_buf+_len, 128 - _len, ".%06ld %s:%d: %s", _tv.tv_usec, __FILE__, __LINE__, __FUNCTION__);\
+    printf("%s " format "\n", _buf, ##__VA_ARGS__);\
+})
+
 using namespace librbd::cache::pwl::rwl::replica;
 
 void usage() {
@@ -96,7 +108,8 @@ int main(int argc, const char* argv[]) {
   // auto &copies1 = g_ceph_context->_conf->rwl_replica_copies;
   // std::cout << "after copies: " << copies1 << std::endl;
   // return 0;
-  ReplicaClient replica_client(g_ceph_context, REQUIRE_SIZE, copies, "rbd", "test", io_ctx);
+  size_t mr_size = 1024 * 1024 * 1024; //max size, can't extend 1G byte
+  ReplicaClient replica_client(g_ceph_context, mr_size, copies, "rbd", "test", io_ctx);
 
   r = replica_client.init_ioctx();
   if (r < 0) {
@@ -114,7 +127,6 @@ int main(int argc, const char* argv[]) {
 
   // data prepare
   bufferlist bl;
-  size_t mr_size = 1024 * 1024 * 1024; //max size, can't extend 1G byte
   bl.append(bufferptr(mr_size));
   bl.rebuild_page_aligned();
   void* mr_ptr = bl.c_str();;
@@ -130,22 +142,51 @@ int main(int argc, const char* argv[]) {
 
   r == 0 && std::cout << "---------------write-----------------------------" << std::endl;
   int cnt = 0;
+  LOG("first write and flush start......");
   replica_client.write(0, mr_size);
-  replica_client.flush(0, mr_size);
+  replica_client.flush();
+  LOG("first write and flush end........");
+  LOG("first write and flush again start......");
+  replica_client.write(0, mr_size);
+  replica_client.flush();
+  LOG("first write and flush again end........");
+  char data1[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ12345+67890abcdefghijklmnopqrstuvwxyz\n";
+  size_t data_size1 = strlen(data1);
+  for(size_t i = 0; i < mr_size; i+=data_size1) {
+    memcpy((char*)mr_ptr + i, data1, data_size1);
+    for (size_t j = 0; j < data_size1; j++) {
+      if (((char*)(mr_ptr))[i+j] != data1[j]) {
+        std::cerr << "Not match: " << i + j << std::endl;
+      }
+    }
+  }
+  for (size_t i = mr_size - data_size1; i < mr_size; i++) {
+    std::cout << ((char*)(mr_ptr))[i];
+  }
+  std::cout << std::endl;
+
   std::cout << "---------------first write flush finshed-------------------" << std::endl;
-  size_t write_size = 512;
-  for (size_t i = 0; i + write_size < mr_size; i+=write_size) {
+  size_t write_size = 112;
+  LOG("second....");
+  for (size_t i = 0; i < mr_size; i+=write_size) {
+    if (i + write_size > mr_size) {
+      break;
+    }
     cnt++;
     replica_client.write(i, write_size);
     // std::cout << (r = replica_client.write(i, i+data_size)) << std::endl;
-    if(cnt % 20 == 0) {
-      replica_client.flush(i, write_size);
+    if(cnt % 40 == 0) {
+      replica_client.flush();
       // std::cout << (r = replica_client.flush(0, mr_size)) << std::endl;
     }
   }
+  replica_client.flush();
+  LOG("Finished...");
+  // replica_client.write(mr_size - data_size1, data_size1);
+  // replica_client.flush();
   // r == 0 && std::cout << "---------------flush-----------------------------" << std::endl;
   r == 0 && std::cout << "---------------close_replica---------------------" << std::endl;
-  //r == 0 && replica_client.replica_close();
+  r == 0 && replica_client.replica_close();
   r == 0 && std::cout << "---------------disconnect------------------------" << std::endl;
   replica_client.disconnect();
   std::cout << "---------------cachefree-------------------------" << std::endl;
