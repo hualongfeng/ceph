@@ -134,7 +134,7 @@ int AcceptorHandler::handle(EventType et) {
   ceph_assert(et == ACCEPT_EVENT);
 
   try {
-    std::shared_ptr<RPMAHandler> server_handler = std::make_shared<RPMAHandler>(_cct, _peer, _ep.get(), _reactor_manager);
+    std::shared_ptr<ServerHandler> server_handler = std::make_shared<ServerHandler>(_cct, _peer, _ep.get(), _reactor_manager);
     server_handler->register_self();
   } catch (std::runtime_error &e) {
     lderr(_cct) << "Runtime error: " << e.what() << dendl;
@@ -316,22 +316,6 @@ int ConnectionHandler::handle_completion() {
     return ret;
   }
 
-  // if (cmpl.op == RPMA_OP_RECV) {
-  //   ldout(_cct, 10) << "RPMA_OP_RECV" << dendl;
-  // } else if ( cmpl.op == RPMA_OP_SEND) {
-  //   ldout(_cct, 10) << "RPMA_OP_SEND" << dendl;
-  // } else if (cmpl.op == RPMA_OP_WRITE) {
-  //   ldout(_cct, 10) << "RPMA_OP_WRITE" << dendl;
-  // } else if (cmpl.op == RPMA_OP_FLUSH) {
-  //   ldout(_cct, 10) << "RPMA_OP_FLUSH" << dendl;
-  // } else if (cmpl.op == RPMA_OP_READ) {
-  //   ldout(_cct, 10) << "RPMA_OP_READ" << dendl;
-  // } else {
-  //   ldout(_cct, 5) << "operation: "
-  //                  << cmpl.op
-  //                  << ". Shouldn't step in this."
-  //                  << dendl;
-  // }
 
   if (cmpl.op_context != nullptr) {
     auto op_func = std::unique_ptr<RpmaOp>{static_cast<RpmaOp*>(const_cast<void *>(cmpl.op_context))};
@@ -388,7 +372,7 @@ int ConnectionHandler::recv(std::function<void()> callback) {
   return ret;
 }
 
-RPMAHandler::RPMAHandler(CephContext *cct,
+ServerHandler::ServerHandler(CephContext *cct,
                          std::shared_ptr<struct rpma_peer> peer,
                          struct rpma_ep *ep,
                          const std::weak_ptr<Reactor> reactor_manager)
@@ -445,7 +429,7 @@ RPMAHandler::RPMAHandler(CephContext *cct,
   init_conn_fd();
 }
 
-int RPMAHandler::register_self() {
+int ServerHandler::register_self() {
   int ret = 0;
   if (auto reactor = _reactor_manager.lock()) {
     if ((ret = reactor->register_handler(shared_from_this(), CONNECTION_EVENT))) {
@@ -459,7 +443,7 @@ int RPMAHandler::register_self() {
   return ret;
 }
 
-int RPMAHandler::remove_self() {
+int ServerHandler::remove_self() {
   int ret = 0;
   if (auto reactor = _reactor_manager.lock()) {
     ret = reactor->remove_handler(shared_from_this(), CONNECTION_EVENT);
@@ -468,11 +452,11 @@ int RPMAHandler::remove_self() {
   return ret;
 }
 
-RPMAHandler::~RPMAHandler() {
+ServerHandler::~ServerHandler() {
   ldout(_cct, 20) << dendl;
 }
 
-int RPMAHandler::register_mr_to_descriptor(RwlReplicaInitRequestReply& init_reply) {
+int ServerHandler::register_mr_to_descriptor(RwlReplicaInitRequestReply& init_reply) {
   int ret = 0;
 
   int usage = RPMA_MR_USAGE_FLUSH_TYPE_PERSISTENT | RPMA_MR_USAGE_WRITE_DST;
@@ -528,7 +512,7 @@ int RPMAHandler::register_mr_to_descriptor(RwlReplicaInitRequestReply& init_repl
   return 0;
 }
 
-int RPMAHandler::get_descriptor_for_write() {
+int ServerHandler::get_descriptor_for_write() {
   RwlReplicaInitRequest init;
   auto it = recv_bl.cbegin();
   init.decode(it);
@@ -560,7 +544,7 @@ int RPMAHandler::get_descriptor_for_write() {
   return 0;
 }
 
-int RPMAHandler::close() {
+int ServerHandler::close() {
   data_mr.reset();
   RwlReplicaFinishedRequestReply reply(RWL_REPLICA_FINISHED_SUCCCESSED);
   if (data_manager.close_and_remove()) {
@@ -577,7 +561,7 @@ int RPMAHandler::close() {
   return 0;
 }
 
-void RPMAHandler::deal_require() {
+void ServerHandler::deal_require() {
   RwlReplicaRequest request;
   auto it = recv_bl.cbegin();
   request.decode(it);

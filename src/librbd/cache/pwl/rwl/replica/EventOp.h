@@ -145,17 +145,16 @@ private:
   std::condition_variable connect_cond_var;
 };
 
-class RPMAHandler : public ConnectionHandler, public std::enable_shared_from_this<RPMAHandler>{
+class ServerHandler : public ConnectionHandler, public std::enable_shared_from_this<ServerHandler>{
 public:
-  // Initialize the client request
-  RPMAHandler(CephContext *cct,
+  ServerHandler(CephContext *cct,
               std::shared_ptr<struct rpma_peer> peer,
               struct rpma_ep *ep,
               const std::weak_ptr<Reactor> reactor_manager);
-  virtual ~RPMAHandler();
+  virtual ~ServerHandler();
   virtual int register_self() override;
   virtual int remove_self() override;
-  virtual const char* name() const override { return "RPMAHandler"; }
+  virtual const char* name() const override { return "ServerHandler"; }
 private:
   int register_mr_to_descriptor(RwlReplicaInitRequestReply& init_reply);
   int get_descriptor_for_write();
@@ -169,7 +168,6 @@ private:
 
 class ClientHandler : public ConnectionHandler, public std::enable_shared_from_this<ClientHandler> {
 public:
-  // Initialize the client request
   ClientHandler(CephContext *cct,
                 const std::string& addr,
                 const std::string& port,
