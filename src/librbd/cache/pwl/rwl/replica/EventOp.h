@@ -3,15 +3,13 @@
 
 #include "EventHandler.h"
 #include "Reactor.h"
-#include <unistd.h>
-#include <inttypes.h>
-#include <atomic>
-#include <set>
 #include "MemoryManager.h"
 #include "RpmaOp.h"
 #include "Types.h"
 #include "include/rados/librados.hpp"
 
+#include <atomic>
+#include <set>
 #include <condition_variable>
 #include <mutex>
 

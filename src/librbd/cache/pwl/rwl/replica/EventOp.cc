@@ -4,10 +4,7 @@
 #include "RpmaOp.h"
 #include "Types.h"
 
-#include <inttypes.h>
-#include "librpma.h"
-#include <iostream>
-#include <assert.h>
+#include <librpma.h>
 #include <string>
 #include <errno.h>
 #include <memory>
@@ -134,7 +131,7 @@ Handle AcceptorHandler::get_handle(EventType et) const {
 
 int AcceptorHandler::handle(EventType et) {
   // Can only be called for an ACCEPT event.
-  assert(et == ACCEPT_EVENT);
+  ceph_assert(et == ACCEPT_EVENT);
 
   try {
     std::shared_ptr<RPMAHandler> server_handler = std::make_shared<RPMAHandler>(_cct, _peer, _ep.get(), _reactor_manager);

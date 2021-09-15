@@ -22,7 +22,7 @@ public:
 
   virtual ~EventHandler() {}
 
-  // Hook method that is called back by the RPMA_Reactor
+  // Hook method that is called back by the Reactor
   // to handle events.
   virtual int handle(EventType et) = 0;
 

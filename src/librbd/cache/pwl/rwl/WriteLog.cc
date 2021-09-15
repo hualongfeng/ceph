@@ -954,7 +954,6 @@ void WriteLog<I>::flush_pmem_buffer(V& ops)
   /* Drain once for all */
   pmem_drain();
   if (m_replica_pool) {
-    //maybe need to correct the offset and length, now we don't consider it.
     m_replica_pool->flush();
   }
 

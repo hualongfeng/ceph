@@ -166,7 +166,7 @@ int main(int argc, const char* argv[]) {
   std::cout << std::endl;
 
   std::cout << "---------------first write flush finshed-------------------" << std::endl;
-  size_t write_size = 112;
+  size_t write_size = 4096;
   LOG("second....");
   for (size_t i = 0; i < mr_size; i+=write_size) {
     if (i + write_size > mr_size) {
