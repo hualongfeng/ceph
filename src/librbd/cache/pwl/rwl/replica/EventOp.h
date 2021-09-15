@@ -53,9 +53,11 @@ class EventHandlerInterface : public EventHandler {
 public:
   EventHandlerInterface(CephContext *cct, std::weak_ptr<Reactor> reactor_ptr): _reactor_manager(reactor_ptr), _cct(cct) {}
   virtual ~EventHandlerInterface() {}
-  virtual const char* name() const = 0;
+
   virtual int register_self() = 0;
   virtual int remove_self() = 0;
+
+  virtual const char* name() const = 0;
 protected:
   std::weak_ptr<Reactor> _reactor_manager;
   CephContext *_cct;
@@ -68,7 +70,6 @@ public:
                   const std::string& addr,
                   const std::string& port,
                   const std::weak_ptr<Reactor> reactor_manager);
-
   virtual ~AcceptorHandler();
   AcceptorHandler(const AcceptorHandler &) = delete;
   AcceptorHandler& operator=(const AcceptorHandler &) = delete;
@@ -76,14 +77,9 @@ public:
   virtual int register_self() override;
   virtual int remove_self() override;
 
-  // Factory method that accepts a new connection request and
-  // creates a RPMA_Handler object to handle connection event
-  // using the connection.
   virtual int handle(EventType et) override;
-
-  // Get the I/O  Handle (called by Reactor when
-  // Acceptor is registered).
   virtual Handle get_handle(EventType et) const override;
+
   virtual const char* name() const override { return "AcceptorHandler"; }
 
 private:
@@ -100,19 +96,16 @@ public:
   ConnectionHandler(CephContext *cct, const std::weak_ptr<Reactor> reactor_manager);
   virtual ~ConnectionHandler();
 
-  // Hook method that handles the connection.
   virtual int handle(EventType et) override;
-   // Get the I/O Handle (called by the Reactor when
-  // the Handler is registered).
   virtual Handle get_handle(EventType et) const override;
 
   int handle_completion();
   int handle_connection_event();
 
+  virtual const char* name() const override { return "ConnectionHandler"; }
+
   int send(std::function<void()> callback);
   int recv(std::function<void()> callback);
-
-  virtual const char* name() const override { return "ConnectionHandler"; }
 
   bool connecting() {return connected.load();}
   // wait for the connection to establish
@@ -152,8 +145,10 @@ public:
               struct rpma_ep *ep,
               const std::weak_ptr<Reactor> reactor_manager);
   virtual ~ServerHandler();
+
   virtual int register_self() override;
   virtual int remove_self() override;
+
   virtual const char* name() const override { return "ServerHandler"; }
 private:
   int register_mr_to_descriptor(RwlReplicaInitRequestReply& init_reply);
@@ -172,12 +167,15 @@ public:
                 const std::string& addr,
                 const std::string& port,
                 const std::weak_ptr<Reactor> reactor_manager);
-
   virtual ~ClientHandler();
+
   ClientHandler(const ClientHandler &) = delete;
   ClientHandler& operator=(const ClientHandler &) = delete;
+
   virtual int register_self() override;
   virtual int remove_self() override;
+
+  virtual const char* name() const override { return "ClientHandler"; }
 
   int disconnect();
 
@@ -188,12 +186,13 @@ public:
             std::function<void()> callback = nullptr);
   int flush(std::function<void()> callback = nullptr);
   int write_atomic(std::function<void()> callback);
+
   int get_remote_descriptor();
   int prepare_for_send();
   int init_replica(epoch_t cache_id, uint64_t cache_size, std::string pool_name, std::string image_name);
   int close_replica();
   int set_head(void *head_ptr, uint64_t size);
-  virtual const char* name() const override { return "ClientHandler"; }
+
 private:
   std::string _address;
   std::string _port;
