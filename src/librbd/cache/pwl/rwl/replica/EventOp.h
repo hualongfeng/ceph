@@ -23,10 +23,6 @@ struct RpmaEpDeleter {
   void operator() (struct rpma_ep *ep_ptr);
 };
 
-struct RpmaReqDeleter {
-  void operator() (struct rpma_conn_req *req_ptr);
-};
-
 struct RpmaMRDeleter {
   void operator() (struct rpma_mr_local *mr_ptr);
 };
@@ -41,7 +37,6 @@ struct RpmaConnCfgDeleter {
 
 using unique_rpma_peer_ptr      = std::unique_ptr<struct rpma_peer, RpmaPeerDeleter>;
 using unique_rpma_ep_ptr        = std::unique_ptr<struct rpma_ep, RpmaEpDeleter>;
-using unique_rpma_req_ptr       = std::unique_ptr<struct rpma_conn_req, RpmaReqDeleter>;
 using unique_rpma_mr_ptr        = std::unique_ptr<struct rpma_mr_local, RpmaMRDeleter>;
 using unique_rpma_remote_mr_ptr = std::unique_ptr<struct rpma_mr_remote, RpmaRemoteMRDeleter>;
 using unique_rpma_cfg_ptr       = std::unique_ptr<struct rpma_conn_cfg, RpmaConnCfgDeleter>;

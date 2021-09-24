@@ -48,10 +48,6 @@ void RpmaEpDeleter::operator() (struct rpma_ep *ep_ptr) {
   rpma_ep_shutdown(&ep_ptr);
 }
 
-void RpmaReqDeleter::operator() (struct rpma_conn_req *req_ptr) {
-  rpma_conn_req_delete(&req_ptr);
-}
-
 void RpmaMRDeleter::operator() (struct rpma_mr_local *mr_ptr) {
   rpma_mr_dereg(&mr_ptr);
 }
