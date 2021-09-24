@@ -45,10 +45,10 @@ void MemoryManager::init(RwlCacheInfo&& info) {
   }
 }
 
-int MemoryManager::close_and_remove() {
+bool MemoryManager::close_and_remove() {
   ldout(_cct, 20) << dendl;
   if (_data == nullptr) {
-    return 0;
+    return true;
   }
   if (_is_pmem) {
     pmem_unmap(_data, _size);

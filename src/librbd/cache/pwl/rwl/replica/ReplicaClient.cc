@@ -19,7 +19,7 @@
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rwl_replica
 #undef dout_prefix
-#define dout_prefix *_dout << "ceph::rwl_repilca::ReplicaClient: " << this << "fenghl: " \
+#define dout_prefix *_dout << "ceph::rwl_repilca::ReplicaClient: " << this << " " \
                            << __func__ << ": "
 
 namespace librbd::cache::pwl::rwl::replica {
@@ -35,9 +35,11 @@ ReplicaClient::ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, s
 ReplicaClient::~ReplicaClient() {
   ldout(_cct, 20) << dendl;
   shutdown();
+  _reactor_thread->join();
 }
 
 void ReplicaClient::shutdown() {
+  ldout(_cct, 20) << dendl;
   _reactor->shutdown();
 }
 
@@ -52,7 +54,10 @@ int ReplicaClient::init(void *head_ptr, uint64_t size) {
     lderr(_cct) << "replica: failed to create cache file in remote replica" << dendl;
     return r;
   }
-  set_head(head_ptr, size);
+  if((r = set_head(head_ptr, size)) < 0) {
+    lderr(_cct) << "replica: failed to set head" << dendl;
+    return r;
+  }
   write(0, size);
   flush();
   return 0;
@@ -238,10 +243,10 @@ int ReplicaClient::cache_request() {
     }
   }
 
-  std::thread([this]{
+  _reactor_thread = std::make_unique<std::thread>([this]{
     this->_reactor->handle_events();
     ldout(_cct, 10) << "End with handle events " << dendl;
-  }).detach();
+  });
 
   for (auto &daemon : _daemons) {
     // wait_established() function need to change

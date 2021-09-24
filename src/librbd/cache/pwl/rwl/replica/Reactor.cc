@@ -111,7 +111,7 @@ int Reactor::handle_events() {
         break;
       }
       event_handle = static_cast<EventHandle*>(event.data.ptr);
-      // ldout(_cct, 20) << "type: " << event_handle->type << dendl;
+
       event_handle->handler->handle(event_handle->type);
       if (empty()) {
         ldout(_cct, 10) << "My event_table is empty!!!" << dendl;

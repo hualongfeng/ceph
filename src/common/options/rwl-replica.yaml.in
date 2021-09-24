@@ -42,3 +42,35 @@ options:
   services:
   - rwl-replica
   with_legacy: true
+- name: rwl_replica_sq_size
+  type: int
+  level: advanced
+  desc: SQ size for RDMA connection
+  default: 50
+  services:
+  - rwl-replica
+  with_legacy: true
+- name: rwl_replica_rq_size
+  type: int
+  level: advanced
+  desc: RQ size for RDMA connection
+  default: 50
+  services:
+  - rwl-replica
+  with_legacy: true
+- name: rwl_replica_cq_size
+  type: int
+  level: advanced
+  desc: CQ size for RDMA connection
+  default: 100
+  services:
+  - rwl-replica
+  with_legacy: true
+- name: rwl_replica_establish_timeout_ms
+  type: int
+  level: advanced
+  desc: Connection establishment timeout
+  default: 1000
+  services:
+  - rwl-replica
+  with_legacy: true

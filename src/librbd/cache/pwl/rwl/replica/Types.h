@@ -10,25 +10,12 @@ namespace librbd::cache::pwl::rwl::replica {
 
 #define MSG_SIZE 4096
 
-#define KILOBYTE     (1024UL)
-#define MEGABYTE     (1024UL * KILOBYTE)
-#define GIGABYTE     (1024UL * MEGABYTE)
-#define SIZE_10GB    (10 * GIGABYTE)
-#define REQUIRE_SIZE (SIZE_10GB)
-
-#define TIMEOUT_15S   (15000) /* [msec] == 15s */
-#define TIMEOUT_1500S (1500000) /* [msec] == 1500s */
-#define CONNECTION_TIMEOUT (1)  //1s
-
-
-
 const int RWL_REPLICA_INIT_REQUEST        = 0x10;
 const int RWL_REPLICA_INIT_SUCCESSED      = 0x11;
 const int RWL_REPLICA_INIT_FAILED         = 0x12;
 const int RWL_REPLICA_FINISHED_REQUEST    = 0x20;
 const int RWL_REPLICA_FINISHED_SUCCCESSED = 0x21;
 const int RWL_REPLICA_FINISHED_FAILED     = 0x22;
-
 
 struct RwlCacheInfo{
     epoch_t cache_id;

@@ -4,11 +4,7 @@
 #include <functional>
 #include <memory>
 #include <atomic>
-
-
-extern "C" {
 #include "librpma.h"
-}
 
 
 namespace librbd::cache::pwl::rwl::replica {
@@ -17,14 +13,14 @@ class RpmaOp {
   std::function<void()> func;
 public:
   RpmaOp(std::function<void()> f) : func(f) {}
-  void do_callback() { if(func) func(); }
+  void do_callback() { if (func) func(); }
   virtual ~RpmaOp() {};
 };
 
 class RpmaRecv : public RpmaOp {
 public:
   RpmaRecv(std::function<void()> f) : RpmaOp(f) {}
-  ~RpmaRecv() {}
+  virtual ~RpmaRecv() {}
 
   int operator() (struct rpma_conn *conn, struct rpma_mr_local *dst, size_t offset, size_t len, const void *op_context) {
     return rpma_recv(conn, dst, offset, len, op_context);
@@ -34,7 +30,7 @@ public:
 class RpmaReqRecv : public RpmaOp {
 public:
   RpmaReqRecv(std::function<void()> f) : RpmaOp(f) {}
-  ~RpmaReqRecv() {}
+  virtual ~RpmaReqRecv() {}
 
   int operator() (struct rpma_conn_req *req, struct rpma_mr_local *dst, size_t offset, size_t len, const void *op_context) {
     return rpma_conn_req_recv(req, dst, offset, len, op_context);
@@ -44,7 +40,7 @@ public:
 class RpmaSend : public RpmaOp {
 public:
   RpmaSend(std::function<void()> f) : RpmaOp(f) {}
-  ~RpmaSend() {}
+  virtual ~RpmaSend() {}
 
   int operator() (struct rpma_conn *conn,
                   const struct rpma_mr_local *src,
@@ -59,7 +55,7 @@ public:
 class RpmaWrite : public RpmaOp {
 public:
   RpmaWrite(std::function<void()> f = nullptr) : RpmaOp(f) {}
-  ~RpmaWrite() {}
+  virtual ~RpmaWrite() {}
 
   int operator() ( struct rpma_conn *conn,
                    struct rpma_mr_remote *dst,
@@ -76,7 +72,7 @@ public:
 class RpmaFlush : public RpmaOp {
 public:
   RpmaFlush(std::function<void()> f = nullptr) : RpmaOp(f) {}
-  ~RpmaFlush() {}
+  virtual ~RpmaFlush() {}
 
   int operator() ( struct rpma_conn *conn,
                    struct rpma_mr_remote *dst,
@@ -92,7 +88,7 @@ public:
 class RpmaRead : public RpmaOp {
 public:
   RpmaRead(std::function<void()> f) : RpmaOp(f) {}
-  ~RpmaRead() {}
+  virtual ~RpmaRead() {}
 
   int operator() (struct rpma_conn *conn,
                   struct rpma_mr_local *dst,
@@ -109,7 +105,7 @@ public:
 class RpmaWriteAtomic : public RpmaOp {
 public:
   RpmaWriteAtomic(std::function<void()> f) : RpmaOp(f) {}
-  ~RpmaWriteAtomic() {}
+  virtual ~RpmaWriteAtomic() {}
 
   int operator() (struct rpma_conn *conn,
                   struct rpma_mr_remote *dst,

@@ -109,7 +109,7 @@ int DaemonPing::get_cache_info_from_filename(fs::path file, struct RwlCacheInfo&
   if (found == std::string::npos) {
     return -1;
   }
-  info.cache_id = std::stoi(filename.substr(found + 1), nullptr, 10);
+  info.cache_id = std::strtoul(filename.substr(found + 1).c_str(), nullptr, 10);
   return 0;
 }
 
@@ -137,7 +137,7 @@ void DaemonPing::C_Ping::finish(int r) {
   int ret = dp->single_ping();
   if (ret < 0) {
     if (dp->_reactor) {
-      ldout(dp->_cct, 5) << "Error: shutdown in DaemonPing" << dendl;
+      ldout(dp->_cct, 1) << "Error: shutdown in DaemonPing" << dendl;
       dp->_reactor->shutdown();
     }
     return;
@@ -172,6 +172,7 @@ void PrimaryPing::C_Ping::finish(int r) {
   if (ok) {
     pping->_ping_timer.add_event_after(20, new C_Ping(pping));
   } else {
+    ldout(pping->_cct, 1) << "Error: shutdown in PrimaryPing" << dendl;
     pping->_client->shutdown();
   }
 }

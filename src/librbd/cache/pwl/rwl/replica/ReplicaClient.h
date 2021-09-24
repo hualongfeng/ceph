@@ -60,6 +60,7 @@ class ReplicaClient {
   CephContext *_cct;
 
   ReactorPtr _reactor;
+  std::unique_ptr<std::thread> _reactor_thread;
 
   std::unique_ptr<PrimaryPing> _ping;
 

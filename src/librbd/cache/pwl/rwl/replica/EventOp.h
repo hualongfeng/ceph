@@ -16,20 +16,35 @@
 namespace librbd::cache::pwl::rwl::replica {
 
 struct RpmaPeerDeleter {
-  void operator() (struct rpma_peer *peer);
+  void operator() (struct rpma_peer *peer_ptr);
 };
 
 struct RpmaEpDeleter {
-  void operator() (struct rpma_ep *ep);
+  void operator() (struct rpma_ep *ep_ptr);
+};
+
+struct RpmaReqDeleter {
+  void operator() (struct rpma_conn_req *req_ptr);
 };
 
 struct RpmaMRDeleter {
-    void operator() (struct rpma_mr_local *mr_ptr);
+  void operator() (struct rpma_mr_local *mr_ptr);
 };
 
-using unique_rpma_peer_ptr = std::unique_ptr<struct rpma_peer, RpmaPeerDeleter>;
-using unique_rpma_ep_ptr = std::unique_ptr<struct rpma_ep, RpmaEpDeleter>;
-using unique_rpma_mr_ptr = std::unique_ptr<struct rpma_mr_local, RpmaMRDeleter>;
+struct RpmaRemoteMRDeleter {
+  void operator() (struct rpma_mr_remote *mr_ptr);
+};
+
+struct RpmaConnCfgDeleter {
+  void operator() (struct rpma_conn_cfg *cfg_ptr);
+};
+
+using unique_rpma_peer_ptr      = std::unique_ptr<struct rpma_peer, RpmaPeerDeleter>;
+using unique_rpma_ep_ptr        = std::unique_ptr<struct rpma_ep, RpmaEpDeleter>;
+using unique_rpma_req_ptr       = std::unique_ptr<struct rpma_conn_req, RpmaReqDeleter>;
+using unique_rpma_mr_ptr        = std::unique_ptr<struct rpma_mr_local, RpmaMRDeleter>;
+using unique_rpma_remote_mr_ptr = std::unique_ptr<struct rpma_mr_remote, RpmaRemoteMRDeleter>;
+using unique_rpma_cfg_ptr       = std::unique_ptr<struct rpma_conn_cfg, RpmaConnCfgDeleter>;
 
 class RpmaConn {
   struct rpma_conn *conn{nullptr};
@@ -118,9 +133,6 @@ protected:
   // Notice: call this function after conn is initialized.
   void init_conn_fd();
 
-  std::set<RpmaOp*> callback_table;
-  std::mutex callback_lock;
-
   std::shared_ptr<struct rpma_peer> _peer;
   RpmaConn _conn;
 
@@ -202,7 +214,7 @@ private:
   unique_rpma_mr_ptr data_mr;
 
   size_t _image_size;
-  struct rpma_mr_remote* _image_mr{nullptr};
+  unique_rpma_remote_mr_ptr _image_mr;
 
   std::mutex message_lock;
   std::condition_variable cond_var;

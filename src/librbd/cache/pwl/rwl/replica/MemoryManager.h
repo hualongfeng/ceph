@@ -24,7 +24,7 @@ public:
   void *get_pointer();
   uint64_t size() {return _size;}
   bool is_pmem() { return _is_pmem;}
-  int close_and_remove();
+  bool close_and_remove();
   int flush_to_osd();
 private:
   void *get_memory_from_pmem(std::string &path);
