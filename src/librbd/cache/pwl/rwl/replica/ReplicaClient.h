@@ -41,21 +41,16 @@ class ReplicaClient {
   std::vector<DaemonInfo> _daemons;
   std::set<uint64_t> _need_free_daemons;
 
-  std::atomic<uint64_t> _write_nums{0U}; // the number of current writing, this is, it initiate write operation, but not finished.
-
-  std::vector<std::pair<size_t, size_t>> writings;
-  std::mutex write_lock;
-
-  std::mutex flush_lock;
-  std::condition_variable flushed_var;
-  std::condition_variable flush_available_var;
-  enum FlushStatus{
+  std::mutex _flush_lock;
+  std::condition_variable _flushed_var;
+  std::condition_variable _flush_available_var;
+  enum FlushStatus {
     FLUSH_UNFINISH_UNAVAILABLE = 0x00,
     FLUSH_FINSHED              = 0x01,
     FLUSH_AVAILABLE            = 0x10,
     FLUSH_INIT                 = FLUSH_AVAILABLE
   };
-  enum FlushStatus flush_status{FLUSH_INIT};
+  enum FlushStatus _flush_status{FLUSH_INIT};
 
   CephContext *_cct;
 
@@ -66,8 +61,6 @@ class ReplicaClient {
 
   librados::Rados rados;
   librados::IoCtx io_ctx;
-
-  uint32_t flag{0};
 
  public:
   ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name, librados::IoCtx& ioctx);

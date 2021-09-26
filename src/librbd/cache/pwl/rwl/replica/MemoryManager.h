@@ -22,8 +22,8 @@ public:
   ~MemoryManager();
   void init(RwlCacheInfo&& info);
   void *get_pointer();
-  uint64_t size() {return _size;}
-  bool is_pmem() { return _is_pmem;}
+  uint64_t size() const {return _size;}
+  bool is_pmem() const { return _is_pmem;}
   bool close_and_remove();
   int flush_to_osd();
 private:

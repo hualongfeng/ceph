@@ -53,11 +53,10 @@ public:
 
   void reset(struct rpma_conn *conn);
 
-  struct rpma_conn *get();
+  struct rpma_conn *get() const;
 
   int disconnect();
 };
-
 
 class EventHandlerInterface : public EventHandler {
 public:
@@ -100,7 +99,6 @@ private:
   unique_rpma_ep_ptr _ep;
 };
 
-
 class ConnectionHandler : public EventHandlerInterface {
 public:
   ConnectionHandler(CephContext *cct, const std::weak_ptr<Reactor> reactor_manager);
@@ -117,7 +115,7 @@ public:
   int send(std::function<void()> callback);
   int recv(std::function<void()> callback);
 
-  bool connecting() {return connected.load();}
+  bool connecting() { return connected.load(); }
   // wait for the connection to establish
   int wait_established();
   int wait_disconnected();
@@ -153,13 +151,16 @@ public:
               const std::weak_ptr<Reactor> reactor_manager);
   virtual ~ServerHandler();
 
+  ServerHandler(const ServerHandler &) = delete;
+  ServerHandler& operator=(const ServerHandler &) = delete;
+
   virtual int register_self() override;
   virtual int remove_self() override;
 
   virtual const char* name() const override { return "ServerHandler"; }
 private:
   int register_mr_to_descriptor(RwlReplicaInitRequestReply& init_reply);
-  int get_descriptor_for_write();
+  int get_local_descriptor();
   void deal_require();
   int close();
 
@@ -192,10 +193,8 @@ public:
             size_t len,
             std::function<void()> callback = nullptr);
   int flush(std::function<void()> callback = nullptr);
-  int write_atomic(std::function<void()> callback);
 
   int get_remote_descriptor();
-  int prepare_for_send();
   int init_replica(epoch_t cache_id, uint64_t cache_size, std::string pool_name, std::string image_name);
   int close_replica();
   int set_head(void *head_ptr, uint64_t size);

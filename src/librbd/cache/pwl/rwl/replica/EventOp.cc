@@ -76,7 +76,7 @@ void RpmaConn::reset(struct rpma_conn *conn) {
   disconnected = false;
 }
 
-struct rpma_conn* RpmaConn::get() {
+struct rpma_conn* RpmaConn::get() const {
   return conn;
 }
 
@@ -468,15 +468,15 @@ int ServerHandler::register_mr_to_descriptor(RwlReplicaInitRequestReply& init_re
   return 0;
 }
 
-int ServerHandler::get_descriptor_for_write() {
+int ServerHandler::get_local_descriptor() {
   RwlReplicaInitRequest init;
   auto it = recv_bl.cbegin();
   init.decode(it);
   ldout(_cct, 5) << "\ncache_id: " << init.info.cache_id << "\n"
-                  << "cache_size: " << init.info.cache_size << "\n"
-                  << "pool_name: " << init.info.pool_name << "\n"
-                  << "image_name: " << init.info.image_name << "\n"
-                  << dendl;
+                 << "cache_size: " << init.info.cache_size << "\n"
+                 << "pool_name: "  << init.info.pool_name << "\n"
+                 << "image_name: " << init.info.image_name << "\n"
+                 << dendl;
 
   if (data_manager.get_pointer() == nullptr) {
     data_manager.init(std::move(init.info));
@@ -523,7 +523,7 @@ void ServerHandler::deal_require() {
   request.decode(it);
   switch (request.type) {
     case RWL_REPLICA_INIT_REQUEST:
-      get_descriptor_for_write();
+      get_local_descriptor();
       break;
     case RWL_REPLICA_FINISHED_REQUEST:
       close();

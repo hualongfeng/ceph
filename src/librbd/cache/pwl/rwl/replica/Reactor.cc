@@ -34,7 +34,6 @@ Reactor::Reactor(CephContext *cct) : _stop(false), _cct(cct) {
   ldout(_cct, 20) << dendl;
   _epoll = epoll_create1(EPOLL_CLOEXEC);
   if (_epoll == -1) {
-    ldout(_cct, 1) << "epoll_create1 failed\n" << dendl;
     throw std::runtime_error("epoll_create1 failed\n");
   }
 }

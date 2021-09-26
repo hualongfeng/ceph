@@ -78,14 +78,14 @@ int ReplicaClient::flush() {
     if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
     cnt++;
     {
-      std::unique_lock locker(flush_lock);
-      flush_available_var.wait(locker, [this]{return this->flush_status & FLUSH_AVAILABLE;});
-      flush_status = FLUSH_UNFINISH_UNAVAILABLE;
+      std::unique_lock locker(_flush_lock);
+      _flush_available_var.wait(locker, [this]{return this->_flush_status & FLUSH_AVAILABLE;});
+      _flush_status = FLUSH_UNFINISH_UNAVAILABLE;
       r = daemon.client_handler->flush([this]() mutable {
         {
-          std::lock_guard locker(flush_lock);
-          flush_status = FLUSH_FINSHED;
-          flushed_var.notify_one();
+          std::lock_guard locker(_flush_lock);
+          _flush_status = FLUSH_FINSHED;
+          _flushed_var.notify_one();
         }
         ldout(_cct, 20) << "flush finished " << dendl;
       });
@@ -94,10 +94,10 @@ int ReplicaClient::flush() {
         return r;
       }
     }
-    std::unique_lock locker(flush_lock);
-    flushed_var.wait(locker, [this]{return this->flush_status & FLUSH_FINSHED;});
-    flush_status = FLUSH_AVAILABLE;
-    flush_available_var.notify_one();
+    std::unique_lock locker(_flush_lock);
+    _flushed_var.wait(locker, [this]{return this->_flush_status & FLUSH_FINSHED;});
+    _flush_status = FLUSH_AVAILABLE;
+    _flush_available_var.notify_one();
   }
   return (cnt == _daemons.size() ? 0 : -1);
 }
