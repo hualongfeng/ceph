@@ -7,7 +7,7 @@
 namespace librbd::cache::pwl::rwl::replica {
 
 // The type of a handle is system specific
-// this example uses RPMA I/O handles, which are
+// this uses RPMA I/O handles, which are
 // plain integer values.
 typedef int Handle;
 

@@ -117,8 +117,8 @@ public:
 
   bool connecting() { return connected.load(); }
   // wait for the connection to establish
-  int wait_established();
-  int wait_disconnected();
+  void wait_established();
+  void wait_disconnected();
 
 protected:
   // Notice: call this function after peer is initialized.

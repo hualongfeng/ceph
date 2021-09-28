@@ -22,14 +22,14 @@ options:
   type: size
   level: advanced
   desc: total cache size of one replica daemon
-  default: 100_G
+  default: 10_G
   services:
   - rwl-replica
   with_legacy: true
 - name: rwl_replica_copies
   type: int
   level: advanced
-  desc: the number of replica copy for each primary; only for test
+  desc: the number of replica copy for each primary;
   default: 1
   services:
   - rwl-replica
@@ -37,7 +37,7 @@ options:
 - name: rwl_replica_enabled
   type: bool
   level: advanced
-  desc: Enable rgw replica.
+  desc: Enable rwl replica.
   default: false
   services:
   - rwl-replica

@@ -1,9 +1,5 @@
-//
-// Created by fenghl on 2021/5/29.
-//
-
-#ifndef RPMA_DEMO_MEMORYMANAGER_H
-#define RPMA_DEMO_MEMORYMANAGER_H
+#ifndef RPMA_MEMORYMANAGER_H
+#define RPMA_MEMORYMANAGER_H
 
 #include <string>
 #include <inttypes.h>
@@ -38,4 +34,4 @@ private:
 };
 
 } //namespace ceph::librbd::cache::pwl::rwl::replica
-#endif //RPMA_DEMO_MEMORYMANAGER_H
+#endif //RPMA_MEMORYMANAGER_H

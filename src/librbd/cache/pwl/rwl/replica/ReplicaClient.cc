@@ -249,18 +249,7 @@ int ReplicaClient::cache_request() {
   });
 
   for (auto &daemon : _daemons) {
-    // wait_established() function need to change
-    // so that it will finish in some times even though
-    // it will not be success
-    // it should a value to indicate whether it is success
-    //TODO:
-    r = daemon.client_handler->wait_established();
-    if (r < 0) {
-      // if there has connection failed, all should be stopped.
-      ldout(_cct, 10) << "wait_established failed!" << dendl;
-      disconnect();
-      break;
-    }
+    daemon.client_handler->wait_established();
   }
 
   if (r == 0) {

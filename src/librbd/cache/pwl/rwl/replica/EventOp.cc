@@ -178,7 +178,7 @@ int ConnectionHandler::handle(EventType et) {
   return -1;
 }
 
-// Notice: call this function after peer is initialized.
+// Notice: call this function after _peer is initialized.
 void ConnectionHandler::init_send_recv_buffer() {
   int ret = 0;
   rpma_mr_local *mr{nullptr};
@@ -292,7 +292,6 @@ int ConnectionHandler::handle_completion() {
     return ret;
   }
 
-
   if (cmpl.op_context != nullptr) {
     auto op_func = std::unique_ptr<RpmaOp>{static_cast<RpmaOp*>(const_cast<void *>(cmpl.op_context))};
     op_func->do_callback();
@@ -300,24 +299,24 @@ int ConnectionHandler::handle_completion() {
   return ret;
 }
 
-int ConnectionHandler::wait_established() {
+void ConnectionHandler::wait_established() {
   ldout(_cct, 20) << dendl;
   std::unique_lock locker(connect_lock);
   connect_cond_var.wait(locker, [this]{return this->connected.load();});
-  return connected.load() == true ? 0 : -1;
+  return ;
 }
 
-int ConnectionHandler::wait_disconnected() {
+void ConnectionHandler::wait_disconnected() {
   ldout(_cct, 20) << dendl;
   std::unique_lock locker(connect_lock);
   connect_cond_var.wait(locker, [this]{return !this->connected.load();});
-  return connected.load() == false ? 0 : -1;
+  return ;
 }
 
 int ConnectionHandler::send(std::function<void()> callback) {
   int ret = 0;
   std::unique_ptr<RpmaSend> usend = std::make_unique<RpmaSend>(callback);
-  ret = (*usend)(_conn.get(), send_mr.get(), 0, MSG_SIZE,RPMA_F_COMPLETION_ALWAYS, usend.get());
+  ret = (*usend)(_conn.get(), send_mr.get(), 0, MSG_SIZE, RPMA_F_COMPLETION_ALWAYS, usend.get());
   if (ret == 0) {
     usend.release();
   }
@@ -618,7 +617,6 @@ int ClientHandler::remove_self() {
   return ret;
 }
 
-
 int ClientHandler::get_remote_descriptor() {
   RwlReplicaInitRequestReply init_reply;
   auto it = recv_bl.cbegin();
@@ -674,7 +672,7 @@ int ClientHandler::init_replica(epoch_t cache_id, uint64_t cache_size, std::stri
   init.info.image_name = image_name;
   bufferlist bl;
   init.encode(bl);
-  assert(bl.length() < MSG_SIZE);
+  ceph_assert(bl.length() < MSG_SIZE);
   memcpy(send_bl.c_str(), bl.c_str(), bl.length());
   {
     std::lock_guard locker(message_lock);
@@ -700,7 +698,7 @@ int ClientHandler::close_replica() {
   RwlReplicaFinishedRequest finish(RWL_REPLICA_FINISHED_REQUEST);
   bufferlist bl;
   finish.encode(bl);
-  assert(bl.length() < MSG_SIZE);
+  ceph_assert(bl.length() < MSG_SIZE);
   memcpy(send_bl.c_str(), bl.c_str(), bl.length());
   {
     std::lock_guard locker(message_lock);

@@ -1,8 +1,5 @@
-//
-// Created by fenghl on 2021/5/29.
-//
-
 #include "MemoryManager.h"
+
 #include <iostream>
 #include <libpmem.h>
 #include <filesystem>
