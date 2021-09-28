@@ -20,6 +20,7 @@
 #include "librbd/cache/pwl/Request.h"
 #include "librbd/cache/pwl/rwl/Builder.h"
 #include "librbd/cache/pwl/rwl/PmemManager.h"
+#include "librbd/cache/pwl/rwl/replica/ReplicaClient.h"
 
 class Context;
 
@@ -56,6 +57,7 @@ private:
   using C_DiscardRequestT = pwl::C_DiscardRequest<This>;
 
   std::unique_ptr<PmemDev> m_log_pool = nullptr;
+  std::unique_ptr<replica::ReplicaClient> m_replica_pool{nullptr};
   uint64_t m_write_num = 0; // Its parity determines which root to write
   Builder<This> *m_builderobj;
   const uint64_t MAX_EXTENT_SIZE = 1048576;

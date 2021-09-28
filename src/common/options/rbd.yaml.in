@@ -836,6 +836,7 @@ options:
   default: /tmp
   services:
   - rbd
+  with_legacy: true
 - name: rbd_persistent_replicated_cache_cls_pool
   type: str
   level: advanced
