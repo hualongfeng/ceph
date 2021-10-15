@@ -319,31 +319,6 @@ bool WriteLog<I>::initialize_pool(Context *on_finish, pwl::DeferredContexts &lat
       return false;
     }
 
-    bool replica_enable = cct->_conf.get_val<bool>("rwl_replica_enabled");
-    bool rwl_in_replica = cct->_conf.get_val<bool>("rwl_in_replica");
-    ldout(cct, 20) << "replica enable: " << replica_enable << dendl;
-    if (replica_enable && !rwl_in_replica) {
-      // used to replica
-      auto copies = cct->_conf->rwl_replica_copies;
-      std::string pool_name = m_image_ctx.md_ctx.get_pool_name();
-      m_replica_pool = std::make_unique<replica::ReplicaClient>(cct,
-                                                                m_log_pool->get_mapped_len(),
-                                                                copies,
-                                                                pool_name,
-                                                                m_image_ctx.name,
-                                                                m_image_ctx.md_ctx);
-      if (!m_replica_pool) {
-        lderr(cct) << "replica: failed to construction" << dendl;
-      }
-
-      ldout(cct, 20) << "ReplicaClient: init()" << dendl;
-      if (m_replica_pool->init(m_log_pool->get_head_addr(), m_log_pool->get_mapped_len()) < 0) {
-        lderr(cct) << "replica: failed to init" << dendl;
-        on_finish->complete(-errno);
-        return false;
-      }
-    }
-
     m_cache_state->present = true;
     m_cache_state->clean = true;
     m_cache_state->empty = true;
@@ -388,9 +363,6 @@ bool WriteLog<I>::initialize_pool(Context *on_finish, pwl::DeferredContexts &lat
                           pool_root, MAX_ROOT_LEN);
       pmem_memset_nodrain(m_log_pool->get_head_addr() + FIRST_ENTRY_OFFSET, 0,
           sizeof(struct WriteLogCacheEntry) * num_small_writes);
-      if (m_replica_pool) {
-        m_replica_pool->write(0, MAX_ROOT_LEN + MAX_ROOT_LEN + sizeof(struct WriteLogCacheEntry) * num_small_writes);
-      }
       m_log_pool->init_data_bit(FIRST_ENTRY_OFFSET +
           sizeof(struct WriteLogCacheEntry) * num_small_writes);
       /* update other run time metadata */
@@ -398,9 +370,6 @@ bool WriteLog<I>::initialize_pool(Context *on_finish, pwl::DeferredContexts &lat
       this->m_free_log_entries = num_small_writes - 1;
       ++m_write_num;
       pmem_drain();
-      if (m_replica_pool) {
-        m_replica_pool->flush();
-      }
     }
   } else {
     m_cache_state->present = true;
@@ -480,6 +449,31 @@ bool WriteLog<I>::initialize_pool(Context *on_finish, pwl::DeferredContexts &lat
     load_existing_entries(later);
     m_cache_state->clean = this->m_dirty_log_entries.empty();
     m_cache_state->empty = m_log_entries.empty();
+  }
+
+  bool replica_enable = cct->_conf.get_val<bool>("rwl_replica_enabled");
+  bool rwl_in_replica = cct->_conf.get_val<bool>("rwl_in_replica");
+  ldout(cct, 20) << "replica enable: " << replica_enable << dendl;
+  if (replica_enable && !rwl_in_replica) {
+    // used to replica
+    auto copies = cct->_conf->rwl_replica_copies;
+    std::string pool_name = m_image_ctx.md_ctx.get_pool_name();
+    m_replica_pool = std::make_unique<replica::ReplicaClient>(cct,
+                                                              m_log_pool->get_mapped_len(),
+                                                              copies,
+                                                              pool_name,
+                                                              m_image_ctx.name,
+                                                              m_image_ctx.md_ctx);
+    if (!m_replica_pool) {
+      lderr(cct) << "replica: failed to construction" << dendl;
+    }
+
+    ldout(cct, 20) << "ReplicaClient: init()" << dendl;
+    if (m_replica_pool->init(m_log_pool->get_head_addr(), m_log_pool->get_mapped_len()) < 0) {
+      lderr(cct) << "replica: failed to init" << dendl;
+      on_finish->complete(-errno);
+      return false;
+    }
   }
   return true;
 }
