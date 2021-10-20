@@ -8739,11 +8739,23 @@ int rwlcache_primaryping(cls_method_context_t hctx, bufferlist *in, bufferlist *
   }
 
   bool has_removed_daemon = false;
-  cls_rbd_rwlcache_map::Cache &cache = map.caches[cache_id];
-  for (auto id : cache.daemons) {
-    if (map.daemons.count(id) == 0) {
-	has_removed_daemon = true;
-	break;
+  auto cache = map.caches.find(cache_id);
+  if (cache != map.caches.end()) {
+    for (auto id : cache->second.daemons) {
+      if (map.daemons.count(id) == 0) {
+        has_removed_daemon = true;
+        break;
+      }
+    }
+  } else {
+    auto uncommitted_cache = map.uncommitted_caches.find(cache_id);
+    if (uncommitted_cache != map.uncommitted_caches.end()) {
+      for (auto id : uncommitted_cache->second.second.daemons) {
+        if (map.daemons.count(id) == 0) {
+          has_removed_daemon = true;
+          break;
+        }
+      }
     }
   }
 
