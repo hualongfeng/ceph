@@ -299,18 +299,20 @@ int ConnectionHandler::handle_completion() {
   return ret;
 }
 
-void ConnectionHandler::wait_established() {
+bool ConnectionHandler::wait_established() {
   ldout(_cct, 20) << dendl;
   std::unique_lock locker(connect_lock);
-  connect_cond_var.wait(locker, [this]{return this->connected.load();});
-  return ;
+  using namespace std::chrono_literals;
+  connect_cond_var.wait_for(locker, 3s, [this]{return this->connected.load();});
+  return this->connected.load();
 }
 
-void ConnectionHandler::wait_disconnected() {
+bool ConnectionHandler::wait_disconnected() {
   ldout(_cct, 20) << dendl;
   std::unique_lock locker(connect_lock);
-  connect_cond_var.wait(locker, [this]{return !this->connected.load();});
-  return ;
+  using namespace std::chrono_literals;
+  connect_cond_var.wait_for(locker, 3s, [this]{return !this->connected.load();});
+  return !this->connected.load();
 }
 
 int ConnectionHandler::send(std::function<void()> callback) {

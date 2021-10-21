@@ -214,7 +214,6 @@ int ReplicaClient::cache_request() {
   r = rwlcache_get_cacheinfo(&io_ctx, _cache_id, info);
   if (r < 0) {
     ldout(_cct, 1) << "rwlcache_get_cacheinfo: " << r << cpp_strerror(r) << dendl;
-    ceph_assert(r == 0);
   }
 
   ceph_assert(info.cache_id == _cache_id);
@@ -249,7 +248,11 @@ int ReplicaClient::cache_request() {
   });
 
   for (auto &daemon : _daemons) {
-    daemon.client_handler->wait_established();
+    bool succeed = daemon.client_handler->wait_established();
+    if (!succeed) {
+      r = -1; // indicate this connection error
+      goto request_ack;
+    }
   }
 
   if (r == 0) {
