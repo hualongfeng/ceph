@@ -21,7 +21,7 @@ public:
   uint64_t size() const {return _size;}
   bool is_pmem() const { return _is_pmem;}
   bool close_and_remove();
-  int flush_to_osd();
+  static int flush_to_osd(CephContext *cct, const RwlCacheInfo &info);
 private:
   void *get_memory_from_pmem(std::string &path);
 

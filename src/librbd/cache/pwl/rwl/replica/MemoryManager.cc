@@ -13,7 +13,7 @@
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_rwl_replica
 #undef dout_prefix
-#define dout_prefix *_dout << "ceph::rwl_repilca::MemoryManager " << ": " << this << " " \
+#define dout_prefix *_dout << "ceph::rwl_repilca::MemoryManager: " << this << " " \
                            << __func__ << ": "
 
 namespace fs = std::filesystem;
@@ -63,7 +63,7 @@ MemoryManager::~MemoryManager() {
   }
   if (_is_pmem) {
     pmem_unmap(_data, _size);
-    flush_to_osd();
+    flush_to_osd(_cct, _info);
   } else {
     free(_data);
   }
@@ -95,47 +95,50 @@ void* MemoryManager::get_memory_from_pmem(std::string &path) {
   return _data;
 }
 
-int MemoryManager::flush_to_osd() {
+#undef dout_prefix
+#define dout_prefix *_dout << "ceph::rwl_repilca::MemoryManager: " << __func__ << ": "
+
+int MemoryManager::flush_to_osd(CephContext *cct, const RwlCacheInfo &info) {
   librados::Rados rados;
   librados::IoCtx io_ctx;
   librbd::RBD rbd;
   librbd::Image image;
 
-  int r = rados.init_with_context(_cct);
+  int r = rados.init_with_context(cct);
   if (r < 0) {
-    lderr(_cct) << "replica: couldn't initialize rados!" << dendl;
+    lderr(cct) << "replica: couldn't initialize rados!" << dendl;
     return r;
   }
 
   r = rados.connect();
   if (r < 0) {
-    lderr(_cct) << "replica: couldn't connect to the cluster!" << dendl;
+    lderr(cct) << "replica: couldn't connect to the cluster!" << dendl;
     return r;
   }
 
-  r = rados.ioctx_create(_info.pool_name.c_str(), io_ctx);
+  r = rados.ioctx_create(info.pool_name.c_str(), io_ctx);
   if (r < 0) {
-    lderr(_cct) << "replica: error opening pool '" << _info.pool_name << "': "
+    lderr(cct) << "replica: error opening pool '" << info.pool_name << "': "
               << cpp_strerror(r) << dendl;
   }
 
-  r = rbd.open(io_ctx, image, _info.image_name.c_str());
+  r = rbd.open(io_ctx, image, info.image_name.c_str());
   if (r < 0) {
-    lderr(_cct) << "replica: error opening image " << _info.image_name << ": "
+    lderr(cct) << "replica: error opening image " << info.image_name << ": "
               << cpp_strerror(r) << dendl;
     return r;
   }
 
   r = image.flush();
   if (r < 0) {
-    lderr(_cct) << "replica: failed to flush at the end: " << cpp_strerror(r)
+    lderr(cct) << "replica: failed to flush at the end: " << cpp_strerror(r)
                 << dendl;
     return r;
   }
 
   r = image.close();
   if (r < 0) {
-    lderr(_cct) << "replica: failed to close the image: " << cpp_strerror(r)
+    lderr(cct) << "replica: failed to close the image: " << cpp_strerror(r)
                 << dendl;
     return r;
   }
