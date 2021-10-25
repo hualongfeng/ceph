@@ -29,6 +29,7 @@
 
 using namespace librbd::cache::pwl::rwl::replica;
 using namespace librbd::cls_client;
+namespace fs = std::filesystem;
 
 void usage() {
   std::cout << "usage: ceph-rwl-replica-server [options...]\n";
@@ -133,6 +134,14 @@ int main(int argc, const char* argv[]) {
   ldout(g_ceph_context, 20) << "addr: " << g_ceph_context->_conf->rwl_replica_addr << dendl;
   ldout(g_ceph_context, 20) << "size: " << g_ceph_context->_conf->rwl_replica_size << dendl;
   ldout(g_ceph_context, 20) << "path: " << g_ceph_context->_conf->rwl_replica_path << dendl;
+
+  for (auto& p : fs::directory_iterator(g_ceph_context->_conf->rwl_replica_path)) {
+    RwlCacheInfo info;
+    if (fs::is_regular_file(p.status())
+        && !DaemonPing::get_cache_info_from_filename(p.path(), info)) {
+      MemoryManager::flush_to_osd(g_ceph_context, info);
+    }
+  }
 
   d_info.id = rados.get_instance_id();
   d_info.rdma_address = ip;

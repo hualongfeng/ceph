@@ -33,7 +33,7 @@ public:
   std::set<epoch_t> need_free_caches;
   std::set<epoch_t> freed_caches;
   std::unordered_map<epoch_t, RwlCacheInfo> infos;
-  int get_cache_info_from_filename(std::filesystem::path file, struct RwlCacheInfo& info);
+  static int get_cache_info_from_filename(std::filesystem::path file, struct RwlCacheInfo& info);
   void update_cacheinfos();
 public:
   DaemonPing(CephContext *cct, librados::Rados &rados, librados::IoCtx &io_ctx);
