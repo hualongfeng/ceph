@@ -89,10 +89,7 @@ int ReplicaClient::flush() {
         }
         ldout(_cct, 20) << "flush finished " << dendl;
       });
-      if (r != 0) {
-        ldout(_cct, 1) << "rpma_flush error: " << r << dendl;
-        return r;
-      }
+      ceph_assert(r == 0);
     }
     std::unique_lock locker(_flush_lock);
     _flushed_var.wait(locker, [this]{return this->_flush_status & FLUSH_FINSHED;});
@@ -110,10 +107,7 @@ int ReplicaClient::write(size_t offset, size_t len) {
     if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
     cnt++;
     r = daemon.client_handler->write(offset, len);
-    if (r != 0) {
-      ldout(_cct, 1) << "rpma_write error: " << r << dendl;
-      return r;
-    }
+    ceph_assert(r == 0);
   }
   return (cnt == _daemons.size() ? 0 : -1);
 }

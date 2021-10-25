@@ -289,8 +289,8 @@ int ConnectionHandler::handle_completion() {
                    << "received completion is not as expected."
                    << dendl;
     _conn.disconnect();
-    return ret;
   }
+  ceph_assert(cmpl.op_status == IBV_WC_SUCCESS);
 
   if (cmpl.op_context != nullptr) {
     auto op_func = std::unique_ptr<RpmaOp>{static_cast<RpmaOp*>(const_cast<void *>(cmpl.op_context))};
