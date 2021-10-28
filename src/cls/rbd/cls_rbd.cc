@@ -8115,6 +8115,26 @@ static void check_expiration_cache(cls_rbd_rwlcache_map &map)
       it++;
     }
   }
+  for (auto it = map.caches.begin(); it != map.caches.end();) {
+    if (it->second.first < now) {
+      CLS_LOG(10, "cache(%u) primaryping timeout, will be remove from caches", it->first);
+
+      cls_rbd_rwlcache_map::Cache &cache = it->second.second;
+      for (auto id = cache.daemons.begin(); id != cache.daemons.end();) {
+	if (map.daemons.count(*id) == 0) {
+	  id = cache.daemons.erase(id);
+	} else {
+	  map.daemons[*id].need_free_caches.insert(it->first);
+	  id++;
+	}
+      }
+      map.free_daemon_space_caches.insert(std::make_pair(it->first, cache));
+      it = map.caches.erase(it);
+    } else {
+      it++;
+    }
+  }
+
 }
 
 static void check_expiration_daemon(cls_rbd_rwlcache_map &map)
@@ -8278,12 +8298,12 @@ int rwlcache_daemonping(cls_method_context_t hctx, bufferlist *in, bufferlist *o
 	}
 
 	// All daemon space freeed, we can remove this cache
-	if (cache.daemons.size() == 0) {
+	if (cache.daemons.empty()) {
 	  map.free_daemon_space_caches.erase(cache_id);
 	}
       } else if (map.caches.count(cache_id)) {
 	// Primary die and daemon flush data and free this cache.
-	cls_rbd_rwlcache_map::Cache &cache = map.caches[cache_id];
+	cls_rbd_rwlcache_map::Cache &cache = map.caches[cache_id].second;
 
 	daemon.free_size += cache.cache_size;
 	cache.daemons.erase(ping.id);
@@ -8305,7 +8325,8 @@ int rwlcache_daemonping(cls_method_context_t hctx, bufferlist *in, bufferlist *o
 	map.caches.erase(cache_id);
       } else {
 	// At replicated-cache setup state, primary die and ack don't timeout or no-one
-	// check uncommitted_cached. Daemon detect rdma disconn and aemon deleted
+
+	// check uncommitted_cached. Daemon detect rdma disconn and daemon deleted
 	// cache-file directly because no data in cache-file.
 	cls_rbd_rwlcache_map::Cache &cache = map.uncommitted_caches[cache_id].second;
 
@@ -8590,7 +8611,9 @@ int rwlcache_request_ack(cls_method_context_t hctx, bufferlist *in, bufferlist *
   auto it = map.uncommitted_caches.find(ack.cache_id);
   if (it != map.uncommitted_caches.end()) {
     if (ack.result == 0) {
-      map.caches.insert(std::make_pair(it->first, it->second.second));
+      utime_t expiration = ceph_clock_now() + utime_t(RBD_RWLCACHE_PRIMARY_PING_TIMEOUT, 0);
+      map.caches.insert(std::make_pair(it->first, it->second));
+      map.caches[it->first].first = expiration;
     } else { //handle error cases
       cls_rbd_rwlcache_map::Cache &cache = it->second.second;
 
@@ -8668,7 +8691,7 @@ int rwlcache_free(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     return -EIO;
   }
 
-  cls_rbd_rwlcache_map::Cache &cache = map.caches[req.cache_id];
+  cls_rbd_rwlcache_map::Cache &cache = map.caches[req.cache_id].second;
   for (auto it = cache.daemons.begin(); it != cache.daemons.end();) {
     if (req.need_free_daemons.count(*it) == 0) {
       map.daemons[*it].free_size += cache.cache_size;
@@ -8741,7 +8764,13 @@ int rwlcache_primaryping(cls_method_context_t hctx, bufferlist *in, bufferlist *
   bool has_removed_daemon = false;
   auto cache = map.caches.find(cache_id);
   if (cache != map.caches.end()) {
-    for (auto id : cache->second.daemons) {
+    utime_t now = ceph_clock_now();
+    if (cache->second.first < now) {
+      CLS_LOG(10, "primary %u lost to send ping", cache_id);
+    }
+    cache->second.first = now + utime_t(RBD_RWLCACHE_PRIMARY_PING_TIMEOUT, 0);
+
+    for (auto id : cache->second.second.daemons) {
       if (map.daemons.count(id) == 0) {
         has_removed_daemon = true;
         break;
