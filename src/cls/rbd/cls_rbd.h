@@ -311,9 +311,10 @@ struct cls_rbd_rwlcache_map {
       for (auto cache_id : need_free_caches) {
         f->dump_unsigned("cache_id", cache_id);
       }
+      utime_t now = ceph_clock_now();
       f->close_section();
       f->open_object_section("expiration");
-      expiration.dump(f);
+      (expiration-now).dump(f);
       f->close_section();
       f->open_object_section("daemon_addr");
       daemon_addr.dump(f);
@@ -394,7 +395,7 @@ struct cls_rbd_rwlcache_map {
 
   // uncommitted_cache recive ack in time and result is ok. Move cahe from uncommitted_cache
   // to caches.
-  std::map<epoch_t, struct Cache> caches;
+  std::map<epoch_t, std::pair<utime_t, struct Cache>> caches;
 
   // Primary can't free related daemon's cache-file, etc rdma-disconnect.
   // So cache move uncommitted_caches or caches to free_daemon_space_caches;
@@ -435,11 +436,13 @@ struct cls_rbd_rwlcache_map {
     }
     f->close_section();
 
+    utime_t now = ceph_clock_now();
+
     f->open_array_section("uncommitted_caches");
     for (const auto& [key, value] : uncommitted_caches) {
       f->open_object_section(std::to_string(key));
       f->open_object_section("expiration");
-      value.first.dump(f);
+      (value.first-now).dump(f);
       f->close_section();
       f->open_object_section("cache info");
       value.second.dump(f);
@@ -451,7 +454,12 @@ struct cls_rbd_rwlcache_map {
     f->open_array_section("caches");
     for (const auto& [key, value] : caches) {
       f->open_object_section(std::to_string(key));
-      value.dump(f);
+      f->open_object_section("expiration");
+      (value.first-now).dump(f);
+      f->close_section();
+      f->open_object_section("cache info");
+      value.second.dump(f);
+      f->close_section();
       f->close_section();
     }
     f->close_section();
