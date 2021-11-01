@@ -311,11 +311,8 @@ struct cls_rbd_rwlcache_map {
       for (auto cache_id : need_free_caches) {
         f->dump_unsigned("cache_id", cache_id);
       }
-      utime_t now = ceph_clock_now();
       f->close_section();
-      f->open_object_section("expiration");
-      (expiration-now).dump(f);
-      f->close_section();
+      f->dump_stream("expiration") << expiration;
       f->open_object_section("daemon_addr");
       daemon_addr.dump(f);
       f->close_section();
@@ -436,14 +433,10 @@ struct cls_rbd_rwlcache_map {
     }
     f->close_section();
 
-    utime_t now = ceph_clock_now();
-
     f->open_array_section("uncommitted_caches");
     for (const auto& [key, value] : uncommitted_caches) {
       f->open_object_section(std::to_string(key));
-      f->open_object_section("expiration");
-      (value.first-now).dump(f);
-      f->close_section();
+      f->dump_stream("expiration") << value.first;
       f->open_object_section("cache info");
       value.second.dump(f);
       f->close_section();
@@ -454,9 +447,7 @@ struct cls_rbd_rwlcache_map {
     f->open_array_section("caches");
     for (const auto& [key, value] : caches) {
       f->open_object_section(std::to_string(key));
-      f->open_object_section("expiration");
-      (value.first-now).dump(f);
-      f->close_section();
+      f->dump_stream("expiration") << value.first;
       f->open_object_section("cache info");
       value.second.dump(f);
       f->close_section();
