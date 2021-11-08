@@ -143,6 +143,9 @@ int AcceptorHandler::handle(EventType et) {
   int ret = 0;
   try {
     std::shared_ptr<ServerHandler> server_handler = std::make_shared<ServerHandler>(_cct, _peer, _ep.get(), _reactor_manager);
+    server_handler->set_error_handler_context(new LambdaContext([this, cct = _cct](int r){
+      ldout(cct, 5) << "some error occur here!!!" << dendl;
+    }));
     ret = server_handler->register_self();
   } catch (std::runtime_error &e) {
     lderr(_cct) << "Runtime error: " << e.what() << dendl;
@@ -155,6 +158,9 @@ ConnectionHandler::ConnectionHandler(CephContext *cct, const std::weak_ptr<React
   : EventHandlerInterface(cct, reactor_manager) {}
 
 ConnectionHandler::~ConnectionHandler() {
+  if (_error_handler_context != nullptr) {
+    delete _error_handler_context;
+  }
   ldout(_cct, 20) << dendl;
 }
 
@@ -222,6 +228,7 @@ int ConnectionHandler::handle_connection_event() {
     // another error occured - disconnect
     lderr(_cct) << "rpma_conn_next_event fails: " << rpma_err_2str(ret) << dendl;
     _conn.disconnect();
+    error_handle(ret);
     return ret;
   }
 
@@ -265,6 +272,7 @@ int ConnectionHandler::handle_completion() {
     // another error occured - disconnect
     lderr(_cct) << "rpma_conn_completion_wait fails: " << rpma_err_2str(ret) << dendl;
     _conn.disconnect();
+    error_handle(ret);
     return ret;
   }
 
@@ -280,6 +288,7 @@ int ConnectionHandler::handle_completion() {
     // another error occured - disconnect
     lderr(_cct) << "rpma_conn_completion_get fails: " << rpma_err_2str(ret) << dendl;
     _conn.disconnect();
+    error_handle(ret);
     return ret;
   }
 
@@ -289,6 +298,8 @@ int ConnectionHandler::handle_completion() {
                    << "received completion is not as expected."
                    << dendl;
     _conn.disconnect();
+    error_handle(-1);
+    return -1;
   }
   ceph_assert(cmpl.op_status == IBV_WC_SUCCESS);
 
@@ -333,6 +344,21 @@ int ConnectionHandler::recv(std::function<void()> callback) {
     rec.release();
   }
   return ret;
+}
+
+void ConnectionHandler::set_error_handler_context(Context *error_callback) {
+  ldout(_cct, 20) << dendl;
+  ceph_assert(error_callback);
+  _error_handler_context = error_callback;
+}
+
+void ConnectionHandler::error_handle(int r) {
+  ldout(_cct, 20) << _error_handler_context << ":" << r << dendl;
+  if (_error_handler_context != nullptr) {
+    ldout(_cct, 20) << dendl;
+    _error_handler_context->complete(r);
+    _error_handler_context = nullptr;
+  }
 }
 
 ServerHandler::ServerHandler(CephContext *cct,
@@ -692,7 +718,7 @@ int ClientHandler::init_replica(epoch_t cache_id, uint64_t cache_size, std::stri
   std::unique_lock locker(message_lock);
   cond_var.wait(locker, [this]{return this->recv_completed;});
 
-  return (recv_completed == true ? (_image_mr == nullptr ? -28 : 0) : -1);
+  return (recv_completed == true ? (_image_mr == nullptr ? -ENOSPC : 0) : -1);
 }
 
 int ClientHandler::close_replica() {
