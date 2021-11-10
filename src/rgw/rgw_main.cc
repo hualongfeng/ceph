@@ -340,7 +340,11 @@ int radosgw_Main(int argc, const char **argv)
   }
   bool rgw_d3n_datacache_enabled = cct->_conf->rgw_d3n_l1_local_datacache_enabled;
   if (rgw_d3n_datacache_enabled && (cct->_conf->rgw_max_chunk_size != cct->_conf->rgw_obj_stripe_size)) {
-    lsubdout(cct, rgw_datacache, 0) << "rgw_d3n:  WARNING: D3N DataCache disabling (D3N requires that the chunk_size equals stripe_size)" << dendl;
+    lsubdout(cct, rgw_datacache, 0) << "rgw_d3n:  WARNING: D3N DataCache disabling (D3N requires that the chunk_size ["
+                                    << cct->_conf->rgw_max_chunk_size
+                                    <<"] equals stripe_size ["
+                                    << cct->_conf->rgw_obj_stripe_size
+                                    <<"])" << dendl;
     rgw_d3n_datacache_enabled = false;
   }
   if (rgw_d3n_datacache_enabled && !cct->_conf->rgw_beast_enable_async) {
@@ -358,6 +362,7 @@ int radosgw_Main(int argc, const char **argv)
     rgw_store = "dbstore";
   }
 #endif
+  lsubdout(cct, rgw, 1) << "rgw store: " << rgw_store << dendl;
 
   rgw::sal::Store* store =
     StoreManager::get_storage(&dp, g_ceph_context,
