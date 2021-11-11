@@ -16,8 +16,12 @@ def immutable_object_cache(ctx, config):
     setup and cleanup immutable object cache
     """
     log.info("start immutable object cache daemon")
-    for client, client_config in config.items():
+    for (client, client_config) in config.items():
         (remote,) = ctx.cluster.only(client).remotes.keys()
+        cluster_name, daemon_type, client_id = teuthology.split_role(client)
+        client_with_id = daemon_type + '.' + client_id
+        client_with_cluster = cluster_name + '.' + client_with_id
+        log.info("client_config: " + str(client_config))
         # make sure that there is one immutable object cache daemon on the same node.
         remote.run(
             args=[
@@ -27,6 +31,8 @@ def immutable_object_cache(ctx, config):
         remote.run(
             args=[
                 'ceph-immutable-object-cache', '-b',
+                '--cluster', cluster_name,
+                '--log-file', '/var/log/ceph/immutable-object-cache.{client_with_cluster}.log'.format(client_with_cluster=client_with_cluster)
                 ]
             )
     try:
@@ -34,9 +40,10 @@ def immutable_object_cache(ctx, config):
     finally:
         log.info("check and cleanup immutable object cache")
         for client, client_config in config.items():
-            client_config = client_config if client_config is not None else dict()
+            client_config = client_config or {}
+            log.info("client_config: " + str(client_config))
             (remote,) = ctx.cluster.only(client).remotes.keys()
-            cache_path = client_config.get('immutable object cache path', '/tmp/ceph-immutable-object-cache')
+            cache_path = client_config.get('immutable_object_cache_path', '/tmp/ceph-immutable-object-cache')
             ls_command = '"$(ls {} )"'.format(cache_path)
             remote.run(
                 args=[
