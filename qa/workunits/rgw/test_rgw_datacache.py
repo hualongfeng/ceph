@@ -137,7 +137,9 @@ def main():
     """
     # setup for test
     cache_dir = os.environ['RGW_DATACACHE_PATH']
+    cache_backend = os.environ['RGW_DATACACHE_BACKEND'] or 'd3n'
     log.debug("datacache dir from config is: %s", cache_dir)
+    log.debug("datacache backand from config is: %s", cache_backend)
 
     out = exec_cmd('pwd')
     pwd = get_cmd_output(out)
@@ -188,29 +190,30 @@ def main():
         log.info("NOTICE: datacache test object not found, inspect if datacache was bypassed or disabled during this check.")
         return
 
-    # list the files in the cache dir for troubleshooting
-    out = exec_cmd('ls -l %s' % (cache_dir))
-    # get name of cached object and check if it exists in the cache
-    out = exec_cmd('find %s -name "*%s*"' % (cache_dir, cached_object_name))
-    cached_object_path = get_cmd_output(out)
-    log.debug("Path of file in datacache is: %s", cached_object_path)
-    out = exec_cmd('basename %s' % (cached_object_path))
-    basename_cmd_out = get_cmd_output(out)
-    log.debug("Name of file in datacache is: %s", basename_cmd_out)
+    if cache_backend == 'd3n':
+        # list the files in the cache dir for troubleshooting
+        out = exec_cmd('ls -l %s' % (cache_dir))
+        # get name of cached object and check if it exists in the cache
+        out = exec_cmd('find %s -name "*%s*"' % (cache_dir, cached_object_name))
+        cached_object_path = get_cmd_output(out)
+        log.debug("Path of file in datacache is: %s", cached_object_path)
+        out = exec_cmd('basename %s' % (cached_object_path))
+        basename_cmd_out = get_cmd_output(out)
+        log.debug("Name of file in datacache is: %s", basename_cmd_out)
 
-    # check to see if the cached object is in Ceph
-    out = exec_cmd('rados ls -p default.rgw.buckets.data')
-    rados_ls_out = get_cmd_output(out)
-    log.debug("rados ls output is: %s", rados_ls_out)
+        # check to see if the cached object is in Ceph
+        out = exec_cmd('rados ls -p default.rgw.buckets.data')
+        rados_ls_out = get_cmd_output(out)
+        log.debug("rados ls output is: %s", rados_ls_out)
 
-    assert(basename_cmd_out in rados_ls_out)
-    log.debug("RGW Datacache test SUCCESS")
+        assert(basename_cmd_out in rados_ls_out)
+        log.debug("RGW Datacache test SUCCESS")
 
-    # remove datacache dir
-    #cmd = exec_cmd('rm -rf %s' % (cache_dir))
-    #log.debug("RGW Datacache dir deleted")
-    #^ commenting for future refrence - the work unit will continue running tests and if the cache_dir is removed
-    #  all the writes to cache will fail with errno 2 ENOENT No such file or directory.
+        # remove datacache dir
+        #cmd = exec_cmd('rm -rf %s' % (cache_dir))
+        #log.debug("RGW Datacache dir deleted")
+        #^ commenting for future refrence - the work unit will continue running tests and if the cache_dir is removed
+        #  all the writes to cache will fail with errno 2 ENOENT No such file or directory.
 
 main()
 log.info("Completed Datacache tests")

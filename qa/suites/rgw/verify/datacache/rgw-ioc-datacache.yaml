@@ -21,3 +21,4 @@ tasks:
       - rgw/run-datacache.sh
     env:
       RGW_DATACACHE_PATH: /tmp/rgw_datacache
+      RGW_DATACACHE_BACKEND: ioc_cache
