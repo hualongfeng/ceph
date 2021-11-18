@@ -169,6 +169,9 @@ def main():
     get_file_path = pwd + '/' + GET_FILE_NAME
     exec_cmd('s3cmd --access_key=%s --secret_key=%s --config=%s --host=%s get s3://%s/%s %s --force'
             % (ACCESS_KEY, SECRET_KEY, s3cmd_config_path, endpoint, BUCKET_NAME, FILE_NAME, get_file_path))
+    # repeat to get object to avoid first to use to establish connect with immutable_object_cache daemon
+    exec_cmd('s3cmd --access_key=%s --secret_key=%s --config=%s --host=%s get s3://%s/%s %s --force'
+            % (ACCESS_KEY, SECRET_KEY, s3cmd_config_path, endpoint, BUCKET_NAME, FILE_NAME, get_file_path))
 
     # get info of object
     out = exec_cmd('radosgw-admin object stat --bucket=%s --object=%s' % (BUCKET_NAME, FILE_NAME))
