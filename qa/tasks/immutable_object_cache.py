@@ -30,7 +30,7 @@ def immutable_object_cache(ctx, config):
             )
         remote.run(
             args=[
-                'ceph-immutable-object-cache', '-b',
+                'sudo', 'ceph-immutable-object-cache', '-b',
                 '--cluster', cluster_name,
                 '--log-file', '/var/log/ceph/immutable-object-cache.{client_with_cluster}.log'.format(client_with_cluster=client_with_cluster)
                 ]
