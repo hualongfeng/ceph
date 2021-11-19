@@ -138,7 +138,7 @@ def main():
     """
     # setup for test
     cache_dir = os.environ['RGW_DATACACHE_PATH']
-    cache_backend = os.environ['RGW_DATACACHE_BACKEND'] or 'd3n'
+    cache_backend = os.environ.get('RGW_DATACACHE_BACKEND', 'd3n')
     log.debug("datacache dir from config is: %s", cache_dir)
     log.debug("datacache backand from config is: %s", cache_backend)
 
