@@ -2,6 +2,7 @@
 
 import logging as log
 from configobj import ConfigObj
+from pathlib import Path
 import subprocess
 import json
 import os
@@ -188,6 +189,10 @@ def main():
     log.debug("Check cache dir content: %s", chk_cache_dir)
     if chk_cache_dir == 0:
         log.info("NOTICE: datacache test object not found, inspect if datacache was bypassed or disabled during this check.")
+        if cache_backend == 'ioc_cache':
+            # To avoid error in immutable-object-cache task
+            # because immutable-object-cache don't allow empty in cache
+            Path(cache_dir + '/' + 'object').touch(exist_ok=True)
         return
 
     if cache_backend == 'd3n':
