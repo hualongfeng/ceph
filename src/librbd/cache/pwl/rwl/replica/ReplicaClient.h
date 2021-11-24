@@ -44,13 +44,7 @@ class ReplicaClient {
   std::mutex _flush_lock;
   std::condition_variable _flushed_var;
   std::condition_variable _flush_available_var;
-  enum FlushStatus {
-    FLUSH_UNFINISH_UNAVAILABLE = 0x00,
-    FLUSH_FINSHED              = 0x01,
-    FLUSH_AVAILABLE            = 0x10,
-    FLUSH_INIT                 = FLUSH_AVAILABLE
-  };
-  enum FlushStatus _flush_status{FLUSH_INIT};
+  size_t _flush_count{0};
 
   CephContext *_cct;
 

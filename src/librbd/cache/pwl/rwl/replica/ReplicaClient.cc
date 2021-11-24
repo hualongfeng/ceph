@@ -99,28 +99,26 @@ void ReplicaClient::error_handle(int r) {
 int ReplicaClient::flush() {
   int r = 0;
   size_t cnt = 0;
+  std::unique_lock locker(_flush_lock);
+  _flush_available_var.wait(locker, [this]{return _flush_count == 0;});
   for (auto &daemon : _daemons) {
     if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
     cnt++;
+    _flush_count++;
     {
-      std::unique_lock locker(_flush_lock);
-      _flush_available_var.wait(locker, [this]{return this->_flush_status & FLUSH_AVAILABLE;});
-      _flush_status = FLUSH_UNFINISH_UNAVAILABLE;
       r = daemon.client_handler->flush([this]() mutable {
         {
           std::lock_guard locker(_flush_lock);
-          _flush_status = FLUSH_FINSHED;
+          _flush_count--;
           _flushed_var.notify_one();
         }
         ldout(_cct, 20) << "flush finished " << dendl;
       });
       ceph_assert(r == 0);
     }
-    std::unique_lock locker(_flush_lock);
-    _flushed_var.wait(locker, [this]{return this->_flush_status & FLUSH_FINSHED;});
-    _flush_status = FLUSH_AVAILABLE;
-    _flush_available_var.notify_one();
   }
+  _flushed_var.wait(locker, [this]{return _flush_count == 0;});
+  _flush_available_var.notify_one();
   return (cnt == _daemons.size() ? 0 : -1);
 }
 
@@ -128,6 +126,7 @@ int ReplicaClient::write(size_t offset, size_t len) {
   ldout(_cct, 20) << offset << ":" << len << dendl;
   int r = 0;
   size_t cnt = 0;
+  len = (len < 4096 ? 4096 : len);
   for (auto &daemon : _daemons) {
     if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
     cnt++;

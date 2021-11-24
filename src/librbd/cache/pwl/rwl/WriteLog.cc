@@ -224,9 +224,6 @@ int WriteLog<I>::append_op_log_entries(GenericLogOperations &ops)
 
   /* Drain once for all */
   pmem_drain();
-  if (m_replica_pool) {
-    m_replica_pool->flush();
-  }
 
   /*
    * Atomically advance the log head pointer and publish the
@@ -972,9 +969,6 @@ void WriteLog<I>::flush_pmem_buffer(V& ops)
 
   /* Drain once for all */
   pmem_drain();
-  if (m_replica_pool) {
-    m_replica_pool->flush();
-  }
 
   now = ceph_clock_now();
   for (auto &operation : ops) {
