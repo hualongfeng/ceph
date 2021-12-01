@@ -126,7 +126,18 @@ int ReplicaClient::write(size_t offset, size_t len) {
   ldout(_cct, 20) << offset << ":" << len << dendl;
   int r = 0;
   size_t cnt = 0;
-  len = (len < 4096 ? 4096 : len);
+  len = (len == 112 ? 128 : len);
+  static size_t one_gigabyte = 1024 * 1024 * 1024;
+  while (len > one_gigabyte) {
+    for (auto &daemon : _daemons) {
+      if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
+      cnt++;
+      r = daemon.client_handler->write(offset, one_gigabyte);
+      ceph_assert(r == 0);
+    }
+    offset += one_gigabyte;
+    len -= one_gigabyte;
+  }
   for (auto &daemon : _daemons) {
     if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
     cnt++;
