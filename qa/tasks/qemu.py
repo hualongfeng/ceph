@@ -18,7 +18,8 @@ from teuthology.orchestra import run
 log = logging.getLogger(__name__)
 
 DEFAULT_NUM_DISKS = 2
-DEFAULT_IMAGE_URL = 'http://download.ceph.com/qa/ubuntu-12.04.qcow2'
+#DEFAULT_IMAGE_URL = 'http://download.ceph.com/qa/ubuntu-12.04.qcow2'
+DEFAULT_IMAGE_URL = 'http://10.239.40.205/software/ubuntu-12.04.qcow2'
 DEFAULT_IMAGE_SIZE = 10240 # in megabytes
 ENCRYPTION_HEADER_SIZE = 16 # in megabytes
 DEFAULT_CPUS = 1
