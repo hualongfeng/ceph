@@ -41,11 +41,6 @@ class ReplicaClient {
   std::vector<DaemonInfo> _daemons;
   std::set<uint64_t> _need_free_daemons;
 
-  std::mutex _flush_lock;
-  std::condition_variable _flushed_var;
-  std::condition_variable _flush_available_var;
-  size_t _flush_count{0};
-
   CephContext *_cct;
 
   ReactorPtr _reactor;
@@ -58,10 +53,13 @@ class ReplicaClient {
 
   Context *_error_handler_context{nullptr};
 
+  void* _local_head_ptr{nullptr};
+
  public:
   ReplicaClient(CephContext *cct, uint64_t size, uint32_t copies, std::string pool_name, std::string image_name, librados::IoCtx& ioctx);
   ~ReplicaClient();
   int write(size_t offset, size_t len);
+  int write(const void* addr, size_t len);
   int flush();
   int init(void *head_ptr, uint64_t size, Context *error_callback);
   void close();

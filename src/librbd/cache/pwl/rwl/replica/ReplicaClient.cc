@@ -75,7 +75,7 @@ int ReplicaClient::init(void *head_ptr, uint64_t size, Context *error_callback) 
     lderr(_cct) << "replica: failed to set head" << dendl;
     return r;
   }
-  write(0, size);
+  write((size_t)0, size);
   flush();
   return 0;
 }
@@ -99,26 +99,35 @@ void ReplicaClient::error_handle(int r) {
 int ReplicaClient::flush() {
   int r = 0;
   size_t cnt = 0;
-  std::unique_lock locker(_flush_lock);
-  _flush_available_var.wait(locker, [this]{return _flush_count == 0;});
+  std::mutex _flush_lock;
+  std::condition_variable _flushed_var;
+  size_t _flush_count{0};
+
   for (auto &daemon : _daemons) {
     if (!daemon.client_handler || !daemon.client_handler->connecting()) continue;
     cnt++;
-    _flush_count++;
     {
-      r = daemon.client_handler->flush([this]() mutable {
+      std::lock_guard locker(_flush_lock);
+      _flush_count++;
+    }
+    {
+      r = daemon.client_handler->flush([this, &_flush_lock, &_flushed_var, &_flush_count]() mutable {
         {
           std::lock_guard locker(_flush_lock);
           _flush_count--;
-          _flushed_var.notify_one();
+          if (_flush_count == 0) {
+            _flushed_var.notify_one();
+          }
         }
         ldout(_cct, 20) << "flush finished " << dendl;
       });
       ceph_assert(r == 0);
     }
   }
-  _flushed_var.wait(locker, [this]{return _flush_count == 0;});
-  _flush_available_var.notify_one();
+  {
+    std::unique_lock locker(_flush_lock);
+    _flushed_var.wait(locker, [this, &_flush_count]{return _flush_count == 0;});
+  }
   return (cnt == _daemons.size() ? 0 : -1);
 }
 
@@ -126,7 +135,7 @@ int ReplicaClient::write(size_t offset, size_t len) {
   ldout(_cct, 20) << offset << ":" << len << dendl;
   int r = 0;
   size_t cnt = 0;
-  len = (len == 112 ? 128 : len);
+  len = (len <= 128 ? 128 : len);
   static size_t one_gigabyte = 1024 * 1024 * 1024;
   while (len > one_gigabyte) {
     for (auto &daemon : _daemons) {
@@ -145,6 +154,12 @@ int ReplicaClient::write(size_t offset, size_t len) {
     ceph_assert(r == 0);
   }
   return (cnt == _daemons.size() ? 0 : -1);
+}
+
+int ReplicaClient::write(const void* addr, size_t len) {
+  ceph_assert(addr);
+  size_t offset = static_cast<size_t>(static_cast<const char*>(addr) - static_cast<const char*>(addr));
+  return write(offset, len);
 }
 
 int ReplicaClient::cache_free() {
@@ -201,6 +216,7 @@ int ReplicaClient::set_head(void *head_ptr, uint64_t size) {
       }
     }
   }
+  _local_head_ptr = head_ptr;
   return 0;
 }
 
