@@ -56,6 +56,7 @@ private:
   using C_DiscardRequestT = pwl::C_DiscardRequest<This>;
 
   std::unique_ptr<PmemDev> m_log_pool = nullptr;
+  struct WriteLogSuperblock *m_superblock = nullptr;
   uint64_t m_sequence_num = 0;
   unsigned m_super_block_crc_len = 0;
   struct WriteLogCacheEntry *m_pmem_log_entries = nullptr;
@@ -73,7 +74,7 @@ private:
   void flush_pmem_buffer(V& ops);
   void inc_allocated_cached_bytes(
       std::shared_ptr<pwl::GenericLogEntry> log_entry) override;
-  void persist_pmem_root();
+  void persist_pmem_superblock();
 
 protected:
   using AbstractWriteLog<ImageCtxT>::m_lock;

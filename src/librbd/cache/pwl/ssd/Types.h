@@ -14,23 +14,23 @@ namespace cache {
 namespace pwl {
 namespace ssd {
 
-struct SuperBlock{
-  WriteLogPoolRoot root;
+struct SSDSuperBlock{
+  WriteLogSuperblock superblock;
 
-  DENC(SuperBlock, v, p) {
+  DENC(SSDSuperBlock, v, p) {
     DENC_START(1, 1, p);
-    denc(v.root, p);
+    denc(v.superblock, p);
     DENC_FINISH(p);
   }
 
   void dump(Formatter *f) const {
-    f->dump_object("super", root);
+    f->dump_object("super", superblock);
   }
 
-  static void generate_test_instances(std::list<SuperBlock*>& ls) {
-    ls.push_back(new SuperBlock);
-    ls.push_back(new SuperBlock);
-    ls.back()->root.first_valid_entry = 2;
+  static void generate_test_instances(std::list<SSDSuperBlock*>& ls) {
+    ls.push_back(new SSDSuperBlock);
+    ls.push_back(new SSDSuperBlock);
+    ls.back()->superblock.first_valid_entry = 2;
   }
 };
 
@@ -39,6 +39,6 @@ struct SuperBlock{
 } // namespace cache
 } // namespace librbd
 
-WRITE_CLASS_DENC(librbd::cache::pwl::ssd::SuperBlock)
+WRITE_CLASS_DENC(librbd::cache::pwl::ssd::SSDSuperBlock)
 
 #endif // CEPH_LIBRBD_CACHE_SSD_TYPES_H
