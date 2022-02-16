@@ -200,13 +200,7 @@ struct WriteLogCacheEntry {
   uint64_t write_sequence_number = 0;
   uint64_t image_offset_bytes;
   uint64_t write_bytes;
-  #ifdef WITH_RBD_RWL
-  uint64_t write_data = 0;     /* offset in pmem,
-                                * 1 offset == MIN_WRITE_ALLOC_SIZE Byte */
-  #endif
-  #ifdef WITH_RBD_SSD_CACHE
-  uint64_t write_data_pos = 0; /* SSD data offset */
-  #endif
+  uint64_t write_data_pos = 0;  /* offset in pmem or SSD */
   union {
     uint8_t flags;
     struct {
@@ -214,7 +208,7 @@ struct WriteLogCacheEntry {
       uint8_t sync_point :1;  /* No data. No write sequence number. Marks sync
                                  point for this sync gen number */
       uint8_t sequenced :1;   /* write sequence number is valid */
-      uint8_t has_data :1;    /* write_data field is valid (else ignore) */
+      uint8_t has_data :1;    /* write_data_pos field is valid (else ignore) */
       uint8_t discard :1;     /* has_data will be 0 if this is a discard */
       uint8_t writesame :1;   /* ws_datalen indicates length of data at write_bytes */
     };

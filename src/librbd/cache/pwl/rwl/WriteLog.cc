@@ -490,8 +490,8 @@ void WriteLog<I>::load_existing_entries(DeferredContexts &later) {
   } else {
     m_log_pool->set_data_offset(FIRST_ENTRY_OFFSET +
         sizeof(struct WriteLogCacheEntry) * this->m_total_log_entries,
-        m_log_entries.front()->ram_entry.write_data,
-        m_log_entries.back()->ram_entry.write_data +
+        m_log_entries.front()->ram_entry.write_data_pos,
+        m_log_entries.back()->ram_entry.write_data_pos +
         m_log_entries.back()->ram_entry.write_bytes);
   }
   this->update_sync_points(missing_sync_points, sync_point_entries, later);
@@ -510,7 +510,7 @@ template <typename I>
 void WriteLog<I>::write_data_to_buffer(
     std::shared_ptr<pwl::WriteLogEntry> ws_entry,
     WriteLogCacheEntry *pmem_entry) {
-  ws_entry->cache_buffer = (char *)m_superblock + pmem_entry->write_data;
+  ws_entry->cache_buffer = (char *)m_superblock + pmem_entry->write_data_pos;
 }
 
 /**
@@ -569,7 +569,7 @@ bool WriteLog<I>::retire_entries(const unsigned long int frees_per_tx) {
         for(entry_iter = retiring_entries.rbegin();
             entry_iter != retiring_entries.rend(); ++entry_iter) {
           if ((*entry_iter)->ram_entry.write_bytes != 0) {
-            m_log_pool->release((*entry_iter)->ram_entry.write_data +
+            m_log_pool->release((*entry_iter)->ram_entry.write_data_pos +
                                 (*entry_iter)->ram_entry.write_bytes);
             ldout(cct, 20) << "Retire to entry index: "
                            << (*entry_iter)->log_entry_index << dendl;
