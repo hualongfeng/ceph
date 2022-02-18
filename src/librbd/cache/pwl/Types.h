@@ -213,9 +213,8 @@ struct WriteLogCacheEntry {
       uint8_t writesame :1;   /* ws_datalen indicates length of data at write_bytes */
     };
   };
-  uint32_t ws_datalen = 0;  /* Length of data buffer (writesame only) */
-  uint32_t entry_index = 0; /* For debug consistency check. Can be removed if
-                             * we need the space */
+  uint32_t ws_datalen = 0;    /* Length of data buffer (writesame only) */
+
   WriteLogCacheEntry(uint64_t image_offset_bytes=0, uint64_t write_bytes=0)
     : image_offset_bytes(image_offset_bytes), write_bytes(write_bytes),
       entry_valid(0), sync_point(0), sequenced(0), has_data(0), discard(0), writesame(0) {
@@ -252,7 +251,6 @@ struct WriteLogCacheEntry {
     denc(v.write_data_pos, p);
     denc(v.flags, p);
     denc(v.ws_datalen, p);
-    denc(v.entry_index, p);
     DENC_FINISH(p);
   }
   #endif

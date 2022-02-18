@@ -67,7 +67,6 @@ void WriteLogCacheEntry::dump(Formatter *f) const {
   f->dump_unsigned("discard", discard);
   f->dump_unsigned("writesame", writesame);
   f->dump_unsigned("ws_datalen", ws_datalen);
-  f->dump_unsigned("entry_index", entry_index);
 }
 
 void WriteLogCacheEntry::generate_test_instances(std::list<WriteLogCacheEntry*>& ls) {
@@ -85,7 +84,6 @@ void WriteLogCacheEntry::generate_test_instances(std::list<WriteLogCacheEntry*>&
   ls.back()->discard = 1;
   ls.back()->writesame = 1;
   ls.back()->ws_datalen = 1;
-  ls.back()->entry_index = 1;
 }
 
 void WriteLogSuperblock::dump(Formatter *f) const {
@@ -96,7 +94,8 @@ void WriteLogSuperblock::dump(Formatter *f) const {
   f->dump_unsigned("block_size", block_size);
   f->dump_unsigned("num_log_entries", num_log_entries);
   f->dump_unsigned("first_free_entry", first_free_entry);
-  f->dump_unsigned("first_valid_entry", first_valid_entry); }
+  f->dump_unsigned("first_valid_entry", first_valid_entry);
+}
 
 void WriteLogSuperblock::generate_test_instances(std::list<WriteLogSuperblock*>& ls) {
   ls.push_back(new WriteLogSuperblock);
@@ -124,8 +123,7 @@ std::ostream& operator<<(std::ostream& os,
      << ", write_sequence_number=" << entry.write_sequence_number
      << ", image_offset_bytes=" << entry.image_offset_bytes
      << ", write_bytes=" << entry.write_bytes
-     << ", ws_datalen=" << entry.ws_datalen
-     << ", entry_index=" << entry.entry_index;
+     << ", ws_datalen=" << entry.ws_datalen;
   return os;
 }
 
