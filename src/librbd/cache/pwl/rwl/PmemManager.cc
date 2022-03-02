@@ -19,9 +19,16 @@ PmemDev::PmemDev(const char * path, const uint64_t size, CephContext *cct)
       "librbd::cache::pwl::PmemManager::m_lock", this))),
     m_cct(cct)
 {
+  bool allow_simulation = cct->_conf.get_val<bool>("rbd_persistent_cache_allow_simulation");
   m_head_addr = create_dev(path, size);
   if (!m_head_addr) {
     lderr(m_cct) << "failed to create pmem device." << dendl;
+    return;
+  }
+  if (allow_simulation == false && m_is_pmem == false) {
+    close_dev();
+    lderr(m_cct) << "the hardware is not pmem and is not in debug mode."
+                 << dendl;
     return;
   }
   m_max_offset = p2align(m_mapped_len, min_write_alloc_size);
@@ -38,9 +45,17 @@ PmemDev::PmemDev(const char * path, CephContext *cct)
       "librbd::cache::pwl::PmemManager::m_lock", this))),
     m_cct(cct)
 {
+  bool allow_simulation = cct->_conf.get_val<bool>("rbd_persistent_cache_allow_simulation");
   m_head_addr = open_dev(path);
   if (!m_head_addr) {
     lderr(m_cct) << "failed to create pmem device." << dendl;
+    return;
+  }
+  if (allow_simulation == false && m_is_pmem == false) {
+    close_dev();
+    lderr(m_cct) << "the hardware is not pmem and is not in debug mode."
+                 << " please enable rbd persistent cache debug and retry."
+                 << dendl;
     return;
   }
   m_max_offset = p2align(m_mapped_len, min_write_alloc_size);
