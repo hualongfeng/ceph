@@ -32,6 +32,8 @@ static std::ostream& _prefix(std::ostream* _dout)
 }
 // -----------------------------------------------------------------------------
 
+#define MAX_LEN (CEPH_PAGE_SIZE)
+
 void QzSessionDeleter::operator() (struct QzSession_S *session) {
   qzTeardownSession(session);
   delete session;
@@ -154,13 +156,27 @@ int QatAccel::compress(const bufferlist &in, bufferlist &out, boost::optional<in
   }
   auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
 
-  for (auto &i : in.buffers()) {
-    const unsigned char* c_in = (unsigned char*) i.c_str();
-    unsigned int len = i.length();
-    unsigned int out_len = qzMaxCompressedLength(len, session.get());
+//for (auto &i : in.buffers()) {
+//  const unsigned char* c_in = (unsigned char*) i.c_str();
+//  unsigned int len = i.length();
+//  unsigned int out_len = qzMaxCompressedLength(len, session.get());
+//  bufferptr ptr = buffer::create_small_page_aligned(out_len);
+//  int rc = qzCompress(session.get(), c_in, &len, (unsigned char *)ptr.c_str(), &out_len, 1);
+//  if (rc != QZ_OK)
+//    return -1;
+//  out.append(ptr, 0, out_len);
+//}
 
-    bufferptr ptr = buffer::create_small_page_aligned(out_len);
-    int rc = qzCompress(session.get(), c_in, &len, (unsigned char *)ptr.c_str(), &out_len, 1);
+  for (ceph::bufferlist::buffers_t::const_iterator i = in.buffers().begin();
+      i != in.buffers().end();) {
+
+    const unsigned char* c_in = (unsigned char*) (*i).c_str();
+    unsigned int len = (*i).length();
+    unsigned int out_len = qzMaxCompressedLength(len, session.get());
+    bufferptr ptr = buffer::create_page_aligned(out_len);
+    i++;
+    bool last = (i == in.buffers().end());
+    int rc = qzCompress(session.get(), c_in, &len, (unsigned char *)ptr.c_str(), &out_len, last);
     if (rc != QZ_OK)
       return -1;
     out.append(ptr, 0, out_len);
@@ -184,7 +200,7 @@ int QatAccel::decompress(bufferlist::const_iterator &p,
   }
   auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
 
-  unsigned int ratio_idx = 0;
+  unsigned int ratio_idx = 1;
   bool read_more = false;
   bool joint = false;
   int rc = 0;
@@ -192,52 +208,42 @@ int QatAccel::decompress(bufferlist::const_iterator &p,
   size_t remaining = std::min<size_t>(p.get_remaining(), compressed_len);
 
   while (remaining) {
-    if (p.end()) {
-      return -1;
-    }
-
-    bufferptr cur_ptr = p.get_current_ptr();
-    unsigned int len = cur_ptr.length();
+    const char* c_in = nullptr;;
+    unsigned int len = p.get_ptr_and_advance(remaining, &c_in);
+    remaining -= len;
     if (joint) {
       if (read_more)
-        tmp.append(cur_ptr.c_str(), len);
+        tmp.append(c_in, len);
       len = tmp.length();
       tmp.rebuild_page_aligned();
     }
 
     unsigned int out_len = len * expansion_ratio[ratio_idx];
-    bufferptr ptr = buffer::create_small_page_aligned(out_len);
+    bufferptr ptr = ceph::buffer::create_page_aligned(out_len);
 
     if (joint)
       rc = qzDecompress(session.get(), (const unsigned char*)tmp.c_str(), &len, (unsigned char*)ptr.c_str(), &out_len);
     else
-      rc = qzDecompress(session.get(), (const unsigned char*)cur_ptr.c_str(), &len, (unsigned char*)ptr.c_str(), &out_len);
+      rc = qzDecompress(session.get(), (const unsigned char*)c_in, &len, (unsigned char*)ptr.c_str(), &out_len);
     if (rc == QZ_DATA_ERROR) {
+      dout(15) << "QAT compressor DATA ERROR" << dendl;
       if (!joint) {
-        tmp.append(cur_ptr.c_str(), cur_ptr.length());
-        p += cur_ptr.length();
-        remaining -= cur_ptr.length();
+        tmp.append(c_in, len);
         joint = true;
       }
       read_more = true;
       continue;
     } else if (rc == QZ_BUF_ERROR) {
-      if (ratio_idx == std::size(expansion_ratio))
-        return -1;
-      if (joint)
-        read_more = false;
-      ratio_idx++;
-      continue;
+      dout(15) << "QAT compressor BUFFER ERROR" << dendl;
+      return -1;
     } else if (rc != QZ_OK) {
+      dout(15) << "QAT compressor NOT OK" << dendl;
       return -1;
     } else {
-      ratio_idx = 0;
       joint = false;
       read_more = false;
     }
 
-    p += cur_ptr.length();
-    remaining -= cur_ptr.length();
     dst.append(ptr, 0, out_len);
   }
 
