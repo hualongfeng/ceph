@@ -37,9 +37,6 @@ void QzSessionDeleter::operator() (struct QzSession_S *session) {
   delete session;
 }
 
-/* Estimate data expansion after decompression */
-static const unsigned int expansion_ratio[] = {5, 20, 50, 100, 200};
-
 static bool get_qz_params(const std::string &alg, QzSessionParams_T &params) {
   int rc;
   rc = qzGetDefaults(&params);
@@ -153,6 +150,9 @@ int QatAccel::compress(const bufferlist &in, bufferlist &out, boost::optional<in
     return -1; // session initialization failed
   }
   auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
+  if (!compressor_message) {
+    compressor_message = in.length();
+  }
 
   for (auto &i : in.buffers()) {
     const unsigned char* c_in = (unsigned char*) i.c_str();
@@ -184,61 +184,32 @@ int QatAccel::decompress(bufferlist::const_iterator &p,
   }
   auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
 
-  unsigned int ratio_idx = 0;
-  bool read_more = false;
-  bool joint = false;
   int rc = 0;
   bufferlist tmp;
   size_t remaining = std::min<size_t>(p.get_remaining(), compressed_len);
+  unsigned int out_len = compressor_message.get();
 
   while (remaining) {
-    if (p.end()) {
-      return -1;
-    }
+    const char* c_in = nullptr;
+    unsigned int len = p.get_ptr_and_advance(remaining, &c_in);
+    remaining -= len;
 
-    bufferptr cur_ptr = p.get_current_ptr();
-    unsigned int len = cur_ptr.length();
-    if (joint) {
-      if (read_more)
-        tmp.append(cur_ptr.c_str(), len);
-      len = tmp.length();
-      tmp.rebuild_page_aligned();
-    }
-
-    unsigned int out_len = len * expansion_ratio[ratio_idx];
     bufferptr ptr = buffer::create_small_page_aligned(out_len);
 
-    if (joint)
-      rc = qzDecompress(session.get(), (const unsigned char*)tmp.c_str(), &len, (unsigned char*)ptr.c_str(), &out_len);
-    else
-      rc = qzDecompress(session.get(), (const unsigned char*)cur_ptr.c_str(), &len, (unsigned char*)ptr.c_str(), &out_len);
-    if (rc == QZ_DATA_ERROR) {
-      if (!joint) {
-        tmp.append(cur_ptr.c_str(), cur_ptr.length());
-        p += cur_ptr.length();
-        remaining -= cur_ptr.length();
-        joint = true;
-      }
-      read_more = true;
-      continue;
-    } else if (rc == QZ_BUF_ERROR) {
-      if (ratio_idx == std::size(expansion_ratio))
-        return -1;
-      if (joint)
-        read_more = false;
-      ratio_idx++;
-      continue;
-    } else if (rc != QZ_OK) {
+    rc = qzDecompress(session.get(), (const unsigned char*)c_in, &len, (unsigned char*)ptr.c_str(), &out_len);
+    if (rc == QZ_OK) {
+      dst.append(ptr, 0, out_len);
+    } else if (rc == QZ_DATA_ERROR) {
+      derr << "QAT compressor DATA ERROR" << dendl;
       return -1;
-    } else {
-      ratio_idx = 0;
-      joint = false;
-      read_more = false;
+    } else if (rc == QZ_BUF_ERROR) {
+      derr << "QAT compressor BUF ERROR" << dendl;
+      return -1;
+    } else if (rc != QZ_OK) {
+      derr << "QAT compressor NOT OK" << dendl;
+      return -1;
     }
 
-    p += cur_ptr.length();
-    remaining -= cur_ptr.length();
-    dst.append(ptr, 0, out_len);
   }
 
   return 0;
