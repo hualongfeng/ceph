@@ -403,7 +403,7 @@ class AES_256_CBC : public BlockCrypt {
 public:
   static const size_t AES_256_KEYSIZE = 256 / 8;
   static const size_t AES_256_IVSIZE = 128 / 8;
-  static const size_t CHUNK_SIZE = 4096;
+  static const size_t CHUNK_SIZE = 65536;
   const DoutPrefixProvider* dpp;
 private:
   static const uint8_t IV[AES_256_IVSIZE];
