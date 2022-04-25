@@ -6,6 +6,7 @@
 #include "include/scope_guard.h"
 #include "common/dout.h"
 #include "common/errno.h"
+#include "semaphore.h"
 
 // -----------------------------------------------------------------------------
 #define dout_context g_ceph_context
@@ -19,11 +20,182 @@ static std::ostream& _prefix(std::ostream* _dout)
 }
 // -----------------------------------------------------------------------------
 
+#define TIMEOUT_MS 500 /* 5 seconds*/
+
+/**
+ *  *******************************************************************************
+ *   * @ingroup sampleUtils
+ *    *      Completion definitions
+ *     *
+ *      ******************************************************************************/
+struct completion_struct
+{
+  sem_t semaphore;
+};
+/* Use semaphores to signal completion of events */
+#define COMPLETION_STRUCT completion_struct
+
+#define COMPLETION_INIT(s) sem_init(&((s)->semaphore), 0, 0);
+
+#define COMPLETION_WAIT(s, timeout) (sem_wait(&((s)->semaphore)) == 0)
+
+#define COMPLETE(s) sem_post(&((s)->semaphore))
+
+#define COMPLETION_DESTROY(s) sem_destroy(&((s)->semaphore))
+
+
+/**
+ *******************************************************************************
+ * @ingroup sampleUtils
+ *      This function and associated macro sleeps for ms milliseconds
+ *
+ * @param[in] ms    sleep time in ms
+ *
+ * @retval none
+ *
+ ******************************************************************************/
+//static __inline CpaStatus sampleSleep(Cpa32U ms)
+//{
+//  int ret = 0;
+//  struct timespec resTime, remTime;
+//  resTime.tv_sec = ms / 1000;
+//  resTime.tv_nsec = (ms % 1000) * 1000000;
+//  do
+//  {
+//     ret = nanosleep(&resTime, &remTime);
+//     resTime = remTime;
+//  } while ((ret != 0) && (errno == EINTR));
+//
+//  if (ret != 0)
+//  {
+//     derr << ("nanoSleep failed with code" << ret << dendl;
+//     return CPA_STATUS_FAIL;
+//  }
+//  else
+//  {
+//     return CPA_STATUS_SUCCESS;
+//  }
+//}
+
+
+/**
+ *******************************************************************************
+ * @ingroup sampleUtils
+ *      This function creates a thread
+ *
+ ******************************************************************************/
+
+//static __inline CpaStatus sampleThreadCreate(sampleThread *thread,
+//                                             void *funct,
+//                                             void *args)
+//{
+//  if (pthread_create(thread, NULL, funct, args) != 0)
+//  {
+//    derr << "Failed create thread" << dendl;
+//    return CPA_STATUS_FAIL;
+//  }
+//  else
+//  {
+//     pthread_detach(*thread);
+//     return CPA_STATUS_SUCCESS;
+//  }
+//}
+
+//static __inline void sampleThreadExit(void)
+//{
+//  pthread_exit(NULL);
+//}
+
+
+/*
+ *  * This function polls a crypto instance.
+ *   *
+ *    */
+//static void sal_polling(CpaInstanceHandle cyInstHandle)
+//{
+//  gPollingCy = 1;
+//  while (gPollingCy)
+//  {
+//    icp_sal_CyPollInstance(cyInstHandle, 0);
+//    OS_SLEEP(10);
+//  }
+//
+//  sampleThreadExit();
+//}
+
+/*
+ *  * This function checks the instance info. If the instance is
+ *   * required to be polled then it starts a polling thread.
+ *    */
+
+//void sampleCyStartPolling(CpaInstanceHandle cyInstHandle)
+//{
+//  CpaInstanceInfo2 info2 = {0};
+//  CpaStatus status = CPA_STATUS_SUCCESS;
+//
+//  status = cpaCyInstanceGetInfo2(cyInstHandle, &info2);
+//  if ((status == CPA_STATUS_SUCCESS) && (info2.isPolled == CPA_TRUE))
+//  {
+//    /* Start thread to poll instance */
+//    sampleThreadCreate(&gPollingThread, sal_polling, cyInstHandle);
+//  }
+//}
+/*
+ *  * This function stops the polling of a crypto instance.
+ *   */
+//void sampleCyStopPolling(void)
+//{
+//  gPollingCy = 0;
+//  OS_SLEEP(10);
+//}
+
+
+
+/*
+ * Callback function
+ * 
+ * This function is "called back" (invoked by the implementation of
+ * the API) when the asynchronous operation has completed.  The
+ * context in which it is invoked depends on the implementation, but
+ * as described in the API it should not sleep (since it may be called
+ * in a context which does not permit sleeping, e.g. a Linux bottom
+ * half).
+ * 
+ * This function can perform whatever processing is appropriate to the
+ * application.  For example, it may free memory, continue processing
+ * of a decrypted packet, etc.  In this example, the function checks
+ * the verifyResult returned and sets the complete variable to indicate
+ * it has been called.
+ */
+static void symCallback(void *pCallbackTag,
+                        CpaStatus status,
+                        const CpaCySymOp operationType,
+                        void *pOpData,
+                        CpaBufferList *pDstBuffer,
+                        CpaBoolean verifyResult)
+{
+  //PRINT_DBG("Callback called with status = %d.\n", status);
+  derr << "fenghl Callback called with status = " << status << dendl;
+
+  //if (CPA_FALSE == verifyResult)
+  //{
+  //  PRINT_ERR("Callback verify result error\n");
+ // }
+
+  if (NULL != pCallbackTag)
+  {
+    /** indicate that the function has been called */
+    COMPLETE((struct COMPLETION_STRUCT *)pCallbackTag);
+  }
+}
+
+
 /*
  * Poller thread & functions
 */
 static std::mutex qcc_alloc_mutex;
 static std::mutex qcc_eng_mutex;
+static std::condition_variable alloc_cv;
 static std::atomic<bool> init_called = { false };
 
 void* QccCrypto::crypt_thread(void *args) {
@@ -35,11 +207,13 @@ void* QccCrypto::crypt_thread(void *args) {
 void QccCrypto::QccFreeInstance(int entry) {
   std::lock_guard<std::mutex> freeinst(qcc_alloc_mutex);
   open_instances.push(entry);
+  alloc_cv.notify_one();
 }
 
 int QccCrypto::QccGetFreeInstance() {
   int ret = -1;
-  std::lock_guard<std::mutex> getinst(qcc_alloc_mutex);
+  std::unique_lock getinst(qcc_alloc_mutex);
+  alloc_cv.wait(getinst, [this](){return !open_instances.empty();});
   if (!open_instances.empty()) {
     ret = open_instances.front();
     open_instances.pop();
@@ -56,11 +230,23 @@ void QccCrypto::cleanup() {
   derr << "Failure during QAT init sequence. Quitting" << dendl;
 }
 
+void QccCrypto::poll_instances(void) {
+  while (!thread_stop) {
+    for (int iter = 0; iter < qcc_inst->num_instances; iter++) {
+      if (qcc_inst->is_polled[iter] == CPA_TRUE && qcc_op_mem[iter].op_complete) {
+        stat = icp_sal_CyPollInstance(qcc_inst->cy_inst_handles[iter], 0);
+        if (stat != CPA_STATUS_SUCCESS) {
+          derr << "poll instance " << iter << " failed" << dendl;
+        }
+      }
+    }
+  }
+}
+
 /*
  * We initialize QAT instance and everything that is common for all ops
 */
-bool QccCrypto::init()
-{
+bool QccCrypto::init() {
 
   std::lock_guard<std::mutex> l(qcc_eng_mutex);
 
@@ -199,6 +385,10 @@ bool QccCrypto::init()
       return false;
     }
   }
+  _reactor_thread = std::make_unique<std::thread>([this]{
+    this->poll_instances();
+    dout(10) << "End with handle events " << dendl;
+  });
   is_init = true;
   dout(10) << "Init complete" << dendl;
   return true;
@@ -220,6 +410,10 @@ bool QccCrypto::destroy() {
     dout(5) << "QAT is still busy and cannot free resources yet" << dendl;
     return false;
   }
+
+  thread_stop = true;
+  _reactor_thread->join();
+  
 
   dout(10) << "Destroying QAT crypto & related memory" << dendl;
   int iter = 0;
@@ -404,7 +598,7 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
   qcc_sess[avail_inst].sess_stp_data.cipherSetupData.pCipherKey = (Cpa8U *)key;
 
   stat = cpaCySymInitSession(qcc_inst->cy_inst_handles[avail_inst],
-      NULL,
+      symCallback,
       &(qcc_sess[avail_inst].sess_stp_data),
       qcc_sess[avail_inst].sess_ctx);
   if (stat != CPA_STATUS_SUCCESS) {
@@ -441,31 +635,72 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
   qcc_op_mem[avail_inst].sym_op_data->messageLenToCipherInBytes = qcc_op_mem[avail_inst].buff_size;
 
   // Perform cipher operation in a thread
-  qcc_thread_args* thread_args = new qcc_thread_args();
-  thread_args->qccinstance = this;
-  thread_args->entry = avail_inst;
+//  qcc_thread_args* thread_args = new qcc_thread_args();
+//  thread_args->qccinstance = this;
+//  thread_args->entry = avail_inst;
 
-  if (pthread_create(&cypollthreads[avail_inst], NULL, crypt_thread, (void *)thread_args) != 0) {
-    derr << "Unable to create thread for crypt operation" << dendl;
-    return false;
-  }
-  if (qcc_inst->is_polled[avail_inst] == CPA_TRUE) {
-    while (!qcc_op_mem[avail_inst].op_complete) {
-      icp_sal_CyPollInstance(qcc_inst->cy_inst_handles[avail_inst], 0);
-    }
-  }
-  pthread_join(cypollthreads[avail_inst], NULL);
+
+//void QccCrypto::do_crypt(qcc_thread_args *thread_args) {
+//  auto entry = thread_args->entry;
+//  qcc_op_mem[entry].op_result = cpaCySymPerformOp(qcc_inst->cy_inst_handles[entry],
+//      NULL,
+//      qcc_op_mem[entry].sym_op_data,
+//      qcc_op_mem[entry].src_buff_list,
+//      qcc_op_mem[entry].src_buff_list,
+//      NULL);
+//  qcc_op_mem[entry].op_complete = true;
+//  free(thread_args);
+//}
+
+//void* QccCrypto::crypt_thread(void *args) {
+//  struct qcc_thread_args *thread_args = (struct qcc_thread_args *)args;
+//  thread_args->qccinstance->do_crypt(thread_args);
+//  return thread_args;
+//}
+  struct COMPLETION_STRUCT complete;
+  auto entry = avail_inst;
+  COMPLETION_INIT(&complete);
+  qcc_op_mem[entry].op_result = cpaCySymPerformOp(qcc_inst->cy_inst_handles[entry],
+      (void *)&complete,
+      qcc_op_mem[entry].sym_op_data,
+      qcc_op_mem[entry].src_buff_list,
+      qcc_op_mem[entry].src_buff_list,
+      NULL);
+  qcc_op_mem[entry].op_complete = true;
+
+//  if (pthread_create(&cypollthreads[avail_inst], NULL, crypt_thread, (void *)thread_args) != 0) {
+//    derr << "Unable to create thread for crypt operation" << dendl;
+//    return false;
+//  }
+//  if (qcc_inst->is_polled[avail_inst] == CPA_TRUE) {
+//    while (!qcc_op_mem[avail_inst].op_complete) {
+//      icp_sal_CyPollInstance(qcc_inst->cy_inst_handles[avail_inst], 0);
+//    }
+//  }
+//  pthread_join(cypollthreads[avail_inst], NULL);
 
   if(qcc_op_mem[avail_inst].op_result != CPA_STATUS_SUCCESS) {
     derr << "Unable to perform crypt operation" << dendl;
     return false;
   }
 
+
+//  derr << "fenghl starting to wait" << dendl;
+  if(qcc_op_mem[avail_inst].op_result == CPA_STATUS_SUCCESS) {
+    if (!COMPLETION_WAIT(&complete, TIMEOUT_MS)) {
+      derr << "timeout or interruption in cpaCySymPerformOp" << dendl;
+      //return false;
+    }
+  }
+//  derr << "fenghl ending to wait" << dendl;
+
   //Copy data back to out buffer
   memcpy(out, qcc_op_mem[avail_inst].src_buff, size);
   //Always cleanup memory holding user-data at the end
   memset(qcc_op_mem[avail_inst].iv_buff, 0, AES_256_IV_LEN);
   memset(qcc_op_mem[avail_inst].src_buff, 0, qcc_op_mem[avail_inst].buff_size);
+
+  COMPLETION_DESTROY(&complete);
 
   return true;
 }

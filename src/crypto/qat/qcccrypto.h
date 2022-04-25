@@ -6,7 +6,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <thread>
 #include <queue>
+#include <memory>
 extern "C" {
 #include "cpa.h"
 #include "lac/cpa_cy_sym.h"
@@ -38,7 +40,7 @@ class QccCrypto {
     // To-Do: Needs to be expanded
     static const size_t AES_256_IV_LEN = 16;
     static const size_t AES_256_KEY_SIZE = 32;
-    static const size_t QCC_MAX_RETRIES = 5000;
+    static const size_t QCC_MAX_RETRIES = 50000;
 
     /*
      * Struct to hold an instance of QAT to handle the crypto operations. These
@@ -109,6 +111,8 @@ class QccCrypto {
     std::queue<int> open_instances;
     int QccGetFreeInstance();
     void QccFreeInstance(int entry);
+    std::unique_ptr<std::thread> _reactor_thread;
+    bool thread_stop{false};
 
     /*
      * Contiguous Memory Allocator and de-allocator. We are using the usdm
@@ -159,6 +163,7 @@ class QccCrypto {
      * Function to cleanup memory if constructor fails
      */
     void cleanup();
+    void poll_instances(void);
 
     /*
      * Crypto Polling Function & helpers
