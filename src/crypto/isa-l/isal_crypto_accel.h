@@ -23,9 +23,9 @@ class ISALCryptoAccel : public CryptoAccel {
 
   bool cbc_encrypt(unsigned char* out, const unsigned char* in, size_t size,
                    const unsigned char (&iv)[AES_256_IVSIZE],
-                   const unsigned char (&key)[AES_256_KEYSIZE]) override;
+                   const unsigned char (&key)[AES_256_KEYSIZE], int engine) override;
   bool cbc_decrypt(unsigned char* out, const unsigned char* in, size_t size,
                    const unsigned char (&iv)[AES_256_IVSIZE],
-                   const unsigned char (&key)[AES_256_KEYSIZE]) override;
+                   const unsigned char (&key)[AES_256_KEYSIZE], int engine) override;
 };
 #endif

@@ -446,11 +446,15 @@ public:
   {
     static std::atomic<bool> failed_to_get_crypto(false);
     CryptoAccelRef crypto_accel;
+    int engine = -1;
     if (! failed_to_get_crypto.load())
     {
       crypto_accel = get_crypto_accel(this->dpp, cct);
-      if (!crypto_accel)
+      if (!crypto_accel) {
         failed_to_get_crypto = true;
+      } else {
+        engine = crypto_accel->get_engine();
+      }
     }
     bool result = true;
     unsigned char iv[AES_256_IVSIZE];
@@ -460,16 +464,19 @@ public:
       if (crypto_accel != nullptr) {
         if (encrypt) {
           result = crypto_accel->cbc_encrypt(out + offset, in + offset,
-                                             process_size, iv, key);
+                                             process_size, iv, key, engine);
         } else {
           result = crypto_accel->cbc_decrypt(out + offset, in + offset,
-                                             process_size, iv, key);
+                                             process_size, iv, key, engine);
         }
       } else {
         result = cbc_transform(
             out + offset, in + offset, process_size,
             iv, key, encrypt);
       }
+    }
+    if (crypto_accel) {
+      crypto_accel->put_engine(engine);
     }
     return result;
   }

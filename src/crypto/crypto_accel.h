@@ -29,9 +29,11 @@ class CryptoAccel {
   static const int AES_256_KEYSIZE = 256/8;
   virtual bool cbc_encrypt(unsigned char* out, const unsigned char* in, size_t size,
                    const unsigned char (&iv)[AES_256_IVSIZE],
-                   const unsigned char (&key)[AES_256_KEYSIZE]) = 0;
+                   const unsigned char (&key)[AES_256_KEYSIZE], int engine) = 0;
   virtual bool cbc_decrypt(unsigned char* out, const unsigned char* in, size_t size,
                    const unsigned char (&iv)[AES_256_IVSIZE],
-                   const unsigned char (&key)[AES_256_KEYSIZE]) = 0;
+                   const unsigned char (&key)[AES_256_KEYSIZE], int engine) = 0;
+  virtual int get_engine() {return -1;};
+	virtual void put_engine(int engine) {};
 };
 #endif

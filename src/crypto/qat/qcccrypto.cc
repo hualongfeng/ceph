@@ -467,7 +467,7 @@ void QccCrypto::do_crypt(qcc_thread_args *thread_args) {
 }
 
 bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
-    size_t size, uint8_t *iv, uint8_t *key, CpaCySymCipherDirection op_type)
+    size_t size, uint8_t *iv, uint8_t *key, CpaCySymCipherDirection op_type, int engine)
 {
   if (!init_called) {
     dout(10) << "QAT not intialized yet. Initializing now..." << dendl;
@@ -483,17 +483,17 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
     return is_init;
   }
 
-  int avail_inst = -1;
-  unsigned int retrycount = 0;
-  while(retrycount <= QCC_MAX_RETRIES) {
-    avail_inst = QccGetFreeInstance();
-    if(avail_inst != -1) {
-      break;
-    } else {
-      retrycount++;
-      usleep(qcc_sleep_duration);
-    }
-  }
+  int avail_inst = engine;
+  // unsigned int retrycount = 0;
+  // while(retrycount <= QCC_MAX_RETRIES) {
+  //   avail_inst = QccGetFreeInstance();
+  //   if(avail_inst != -1) {
+  //     break;
+  //   } else {
+  //     retrycount++;
+  //     usleep(qcc_sleep_duration);
+  //   }
+  // }
 
   if(avail_inst == -1) {
     derr << "Unable to get an QAT instance. Failing request" << dendl;
@@ -508,7 +508,7 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
       //free up the instance irrespective of the op status
       dout(15) << "Completed task under " << avail_inst << dendl;
       qcc_op_mem[avail_inst].op_complete = false;
-      QccCrypto::QccFreeInstance(avail_inst);
+      // QccCrypto::QccFreeInstance(avail_inst);
       });
 
   /*

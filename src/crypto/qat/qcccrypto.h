@@ -32,7 +32,7 @@ class QccCrypto {
     bool perform_op(unsigned char* out, const unsigned char* in, size_t size,
         uint8_t *iv,
         uint8_t *key,
-        CpaCySymCipherDirection op_type);
+        CpaCySymCipherDirection op_type, int engine);
 
   private:
 
@@ -109,8 +109,10 @@ class QccCrypto {
      * Handle queue with free instances to handle op
      */
     std::queue<int> open_instances;
+    public:
     int QccGetFreeInstance();
     void QccFreeInstance(int entry);
+    private:
     std::unique_ptr<std::thread> _reactor_thread;
     bool thread_stop{false};
 
