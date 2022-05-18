@@ -50,7 +50,7 @@ _prefix(std::ostream* _dout)
 // desired memory usage level. increasing to 9 doesn't speed things up
 // significantly (helps only on >=16K blocks) and sometimes degrades
 // compression ratio.
-#define ZLIB_MEMORY_LEVEL 8
+#define ZLIB_MEMORY_LEVEL MAX_MEM_LEVEL
 
 int ZlibCompressor::zlib_compress(const bufferlist &in, bufferlist &out, boost::optional<int32_t> &compressor_message)
 {

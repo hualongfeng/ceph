@@ -39,7 +39,7 @@ class QatAccel {
 
   int compress(const bufferlist &in, bufferlist &out, boost::optional<int32_t> &compressor_message);
   int decompress(const bufferlist &in, bufferlist &out, boost::optional<int32_t> compressor_message);
-  int decompress(bufferlist::const_iterator &p, size_t compressed_len, bufferlist &dst, boost::optional<int32_t> compressor_message);
+  int decompress(bufferlist::const_iterator &p, size_t compressed_len, bufferlist &out, boost::optional<int32_t> compressor_message);
 
  private:
   // get a session from the pool or create a new one. returns null if session init fails
@@ -49,6 +49,7 @@ class QatAccel {
   std::vector<session_ptr> sessions;
   std::mutex mutex;
   std::string alg_name;
+  unsigned int slice_sz;
 };
 
 #endif

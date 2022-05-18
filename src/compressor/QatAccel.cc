@@ -31,6 +31,7 @@ static std::ostream& _prefix(std::ostream* _dout)
   return *_dout << "QatAccel: ";
 }
 // -----------------------------------------------------------------------------
+#define MAX_LEN (CEPH_PAGE_SIZE)
 
 void QzSessionDeleter::operator() (struct QzSession_S *session) {
   qzTeardownSession(session);
@@ -46,7 +47,8 @@ static bool get_qz_params(const std::string &alg, QzSessionParams_T &params) {
   params.is_busy_polling = true;
   if (alg == "zlib") {
     params.comp_algorithm = QZ_DEFLATE;
-    params.data_fmt = QZ_DEFLATE_GZIP_EXT;
+    params.data_fmt = QZ_DEFLATE_RAW;
+    params.comp_lvl = g_ceph_context->_conf->compressor_zlib_level;
   }
   else {
     // later, there also has lz4.
@@ -135,6 +137,10 @@ bool QatAccel::init(const std::string &alg) {
     return true;
   }
 
+  QzSessionParams_T params = {(QzHuffmanHdr_T)0,};
+  qzGetDefaults(&params);
+  slice_sz = params.hw_buff_sz / 4;
+
   dout(15) << "First use for QAT compressor" << dendl;
   if (alg != "zlib") {
     return false;
@@ -145,27 +151,63 @@ bool QatAccel::init(const std::string &alg) {
 }
 
 int QatAccel::compress(const bufferlist &in, bufferlist &out, boost::optional<int32_t> &compressor_message) {
+  dout(1) << "fenghl: in QAT compress: " << in.length() << dendl;
   auto s = get_session(); // get a session from the pool
   if (!s) {
     return -1; // session initialization failed
   }
   auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
-  if (!compressor_message) {
-    compressor_message = in.length();
-  }
+  compressor_message = g_ceph_context->_conf->compressor_zlib_winsize;
+
+  int rc = 0;
+  QzStream_T comp_strm = {0};
+  unsigned int consumed = 0;
+  unsigned int last = 0;
+  int begin = 1;
+  unsigned have;
+  unsigned int input_left = 0;
+  unsigned int orig_sz = 0;
 
   for (auto &i : in.buffers()) {
-    const unsigned char* c_in = (unsigned char*) i.c_str();
-    unsigned int len = i.length();
-    unsigned int out_len = qzMaxCompressedLength(len, session.get());
+    orig_sz = input_left = i.length();
+    do {
+      comp_strm.in = (unsigned char*) i.c_str() + orig_sz - input_left;
+      comp_strm.in_sz = (input_left > slice_sz) ? slice_sz : input_left;
+      last = (((consumed + comp_strm.in_sz) == in.length()) ? 1 : 0);
 
-    bufferptr ptr = buffer::create_small_page_aligned(out_len);
-    int rc = qzCompress(session.get(), c_in, &len, (unsigned char *)ptr.c_str(), &out_len, 1);
-    if (rc != QZ_OK)
-      return -1;
-    out.append(ptr, 0, out_len);
+      bufferptr ptr = ceph::buffer::create_page_aligned(MAX_LEN);
+      comp_strm.out = (unsigned char*)ptr.c_str() + begin;
+      comp_strm.out_sz = MAX_LEN - begin;
+
+      rc = qzCompressStream(session.get(), &comp_strm, last);
+      if (rc != QZ_OK) {
+        derr << "fenghl Compression error: compress return qzCompressStream ERROR("
+              << rc << ")" << dendl;
+        qzEndStream(session.get(), &comp_strm);
+        return -1;
+      }
+      consumed += comp_strm.in_sz;
+      input_left -= comp_strm.in_sz;
+
+      have = comp_strm.out_sz + begin;
+      if (begin) {
+        // put a compressor variation mark in front of compressed stream, not used at the moment
+        ptr.c_str()[0] = 0;
+        begin = 0;
+      }
+      out.append(ptr, 0, have);
+      dout(1) << "fenghl left: " << last << dendl;
+      dout(1) << "fenghl: input left" << input_left << ", orig_sz: "<< orig_sz << dendl;
+      dout(1) << "fenghl: pending_in" << comp_strm.pending_in << ", pending_out: "<< comp_strm.pending_out << " have: " << have << dendl;
+    } while (!(1 == last && 0 == comp_strm.pending_in && 0 == comp_strm.pending_out));
   }
+  
+  dout(1) << "fenghl 1------------------------: " << dendl;
+  qzEndStream(session.get(), &comp_strm);
+  dout(1) << "fenghl 2------------------------: " << dendl;
 
+
+  dout(1) << "fenghl: out QAT compress" << dendl;
   return 0;
 }
 
@@ -176,8 +218,9 @@ int QatAccel::decompress(const bufferlist &in, bufferlist &out, boost::optional<
 
 int QatAccel::decompress(bufferlist::const_iterator &p,
 		 size_t compressed_len,
-		 bufferlist &dst,
+		 bufferlist &out,
 		 boost::optional<int32_t> compressor_message) {
+  int begin = 1;
   auto s = get_session(); // get a session from the pool
   if (!s) {
     return -1; // session initialization failed
@@ -185,32 +228,40 @@ int QatAccel::decompress(bufferlist::const_iterator &p,
   auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
 
   int rc = 0;
+  unsigned have;
   bufferlist tmp;
   size_t remaining = std::min<size_t>(p.get_remaining(), compressed_len);
-  unsigned int out_len = compressor_message.get();
+
+  QzStream_T comp_strm = {0};
+  unsigned int last = 0;
 
   while (remaining) {
     const char* c_in = nullptr;
     unsigned int len = p.get_ptr_and_advance(remaining, &c_in);
     remaining -= len;
+    comp_strm.in = reinterpret_cast<unsigned char*>(const_cast<char*>(c_in)) + begin;
+    comp_strm.in_sz = len - begin;
+    begin = 0;
 
-    bufferptr ptr = buffer::create_small_page_aligned(out_len);
+    do {
+      bufferptr ptr = buffer::create_small_page_aligned(MAX_LEN);
 
-    rc = qzDecompress(session.get(), (const unsigned char*)c_in, &len, (unsigned char*)ptr.c_str(), &out_len);
-    if (rc == QZ_OK) {
-      dst.append(ptr, 0, out_len);
-    } else if (rc == QZ_DATA_ERROR) {
-      derr << "QAT compressor DATA ERROR" << dendl;
-      return -1;
-    } else if (rc == QZ_BUF_ERROR) {
-      derr << "QAT compressor BUF ERROR" << dendl;
-      return -1;
-    } else if (rc != QZ_OK) {
-      derr << "QAT compressor NOT OK" << dendl;
-      return -1;
-    }
+      comp_strm.out = (unsigned char*)ptr.c_str();
+      comp_strm.out_sz = MAX_LEN;
+      last = remaining == 0 ? 1 : 0;
 
+      rc = qzDecompressStream(session.get(), &comp_strm, last);
+      if (rc != QZ_OK) {
+        derr << "ERROR: Decompression FAILED with return value: "
+            << rc << dendl;
+        qzEndStream(session.get(), &comp_strm);
+        return -1;
+      }
+      have = MAX_LEN - comp_strm.out_sz;
+      out.append(ptr, 0, have);
+    } while (1 == last && 0 == comp_strm.pending_in && 0 == comp_strm.pending_out);
   }
 
+  qzEndStream(session.get(), &comp_strm);
   return 0;
 }
