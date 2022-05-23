@@ -246,7 +246,7 @@ int QatAccel::decompress(bufferlist::const_iterator &p,
       comp_strm.out = (unsigned char*)ptr.c_str();
       comp_strm.out_sz = MAX_LEN;
       last = ((remaining == 0 && input_left == 0) ? 1 : 0);
-
+      dout(10) << "fenghl1 in size:" << comp_strm.in_sz << dendl;
 
       rc = qzDecompressStream(session.get(), &comp_strm, last);
       if (rc != QZ_OK) {
@@ -256,6 +256,7 @@ int QatAccel::decompress(bufferlist::const_iterator &p,
         return -1;
       }
       consumed += comp_strm.in_sz;
+      dout(10) << "fenghl2 in size:" << comp_strm.in_sz << dendl;
       input_left -= comp_strm.in_sz;
       have = comp_strm.out_sz;
       out.append(ptr, 0, have);
@@ -263,7 +264,7 @@ int QatAccel::decompress(bufferlist::const_iterator &p,
                << " pending_out:" << comp_strm.pending_out << dendl;
       dout(10) << "fenghl have:" << have << " last: " << last << dendl;
       dout(10) << "fenghl input_left: " << input_left << dendl;
-    } while (1 == last && 0 == comp_strm.pending_in && 0 == comp_strm.pending_out);
+    } while (!(1 == last && 0 == comp_strm.pending_in && 0 == comp_strm.pending_out));
   }
 
   qzEndStream(session.get(), &comp_strm);
