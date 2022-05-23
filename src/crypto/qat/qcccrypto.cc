@@ -44,113 +44,6 @@ struct completion_struct
 #define COMPLETION_DESTROY(s) sem_destroy(&((s)->semaphore))
 
 
-/**
- *******************************************************************************
- * @ingroup sampleUtils
- *      This function and associated macro sleeps for ms milliseconds
- *
- * @param[in] ms    sleep time in ms
- *
- * @retval none
- *
- ******************************************************************************/
-//static __inline CpaStatus sampleSleep(Cpa32U ms)
-//{
-//  int ret = 0;
-//  struct timespec resTime, remTime;
-//  resTime.tv_sec = ms / 1000;
-//  resTime.tv_nsec = (ms % 1000) * 1000000;
-//  do
-//  {
-//     ret = nanosleep(&resTime, &remTime);
-//     resTime = remTime;
-//  } while ((ret != 0) && (errno == EINTR));
-//
-//  if (ret != 0)
-//  {
-//     derr << ("nanoSleep failed with code" << ret << dendl;
-//     return CPA_STATUS_FAIL;
-//  }
-//  else
-//  {
-//     return CPA_STATUS_SUCCESS;
-//  }
-//}
-
-
-/**
- *******************************************************************************
- * @ingroup sampleUtils
- *      This function creates a thread
- *
- ******************************************************************************/
-
-//static __inline CpaStatus sampleThreadCreate(sampleThread *thread,
-//                                             void *funct,
-//                                             void *args)
-//{
-//  if (pthread_create(thread, NULL, funct, args) != 0)
-//  {
-//    derr << "Failed create thread" << dendl;
-//    return CPA_STATUS_FAIL;
-//  }
-//  else
-//  {
-//     pthread_detach(*thread);
-//     return CPA_STATUS_SUCCESS;
-//  }
-//}
-
-//static __inline void sampleThreadExit(void)
-//{
-//  pthread_exit(NULL);
-//}
-
-
-/*
- *  * This function polls a crypto instance.
- *   *
- *    */
-//static void sal_polling(CpaInstanceHandle cyInstHandle)
-//{
-//  gPollingCy = 1;
-//  while (gPollingCy)
-//  {
-//    icp_sal_CyPollInstance(cyInstHandle, 0);
-//    OS_SLEEP(10);
-//  }
-//
-//  sampleThreadExit();
-//}
-
-/*
- *  * This function checks the instance info. If the instance is
- *   * required to be polled then it starts a polling thread.
- *    */
-
-//void sampleCyStartPolling(CpaInstanceHandle cyInstHandle)
-//{
-//  CpaInstanceInfo2 info2 = {0};
-//  CpaStatus status = CPA_STATUS_SUCCESS;
-//
-//  status = cpaCyInstanceGetInfo2(cyInstHandle, &info2);
-//  if ((status == CPA_STATUS_SUCCESS) && (info2.isPolled == CPA_TRUE))
-//  {
-//    /* Start thread to poll instance */
-//    sampleThreadCreate(&gPollingThread, sal_polling, cyInstHandle);
-//  }
-//}
-/*
- *  * This function stops the polling of a crypto instance.
- *   */
-//void sampleCyStopPolling(void)
-//{
-//  gPollingCy = 0;
-//  OS_SLEEP(10);
-//}
-
-
-
 /*
  * Callback function
  * 
@@ -634,29 +527,6 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
   qcc_op_mem[avail_inst].sym_op_data->cryptoStartSrcOffsetInBytes = 0;
   qcc_op_mem[avail_inst].sym_op_data->messageLenToCipherInBytes = qcc_op_mem[avail_inst].buff_size;
 
-  // Perform cipher operation in a thread
-//  qcc_thread_args* thread_args = new qcc_thread_args();
-//  thread_args->qccinstance = this;
-//  thread_args->entry = avail_inst;
-
-
-//void QccCrypto::do_crypt(qcc_thread_args *thread_args) {
-//  auto entry = thread_args->entry;
-//  qcc_op_mem[entry].op_result = cpaCySymPerformOp(qcc_inst->cy_inst_handles[entry],
-//      NULL,
-//      qcc_op_mem[entry].sym_op_data,
-//      qcc_op_mem[entry].src_buff_list,
-//      qcc_op_mem[entry].src_buff_list,
-//      NULL);
-//  qcc_op_mem[entry].op_complete = true;
-//  free(thread_args);
-//}
-
-//void* QccCrypto::crypt_thread(void *args) {
-//  struct qcc_thread_args *thread_args = (struct qcc_thread_args *)args;
-//  thread_args->qccinstance->do_crypt(thread_args);
-//  return thread_args;
-//}
   struct COMPLETION_STRUCT complete;
   auto entry = avail_inst;
   COMPLETION_INIT(&complete);
@@ -667,17 +537,6 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
       qcc_op_mem[entry].src_buff_list,
       NULL);
   qcc_op_mem[entry].op_complete = true;
-
-//  if (pthread_create(&cypollthreads[avail_inst], NULL, crypt_thread, (void *)thread_args) != 0) {
-//    derr << "Unable to create thread for crypt operation" << dendl;
-//    return false;
-//  }
-//  if (qcc_inst->is_polled[avail_inst] == CPA_TRUE) {
-//    while (!qcc_op_mem[avail_inst].op_complete) {
-//      icp_sal_CyPollInstance(qcc_inst->cy_inst_handles[avail_inst], 0);
-//    }
-//  }
-//  pthread_join(cypollthreads[avail_inst], NULL);
 
   if(qcc_op_mem[avail_inst].op_result != CPA_STATUS_SUCCESS) {
     derr << "Unable to perform crypt operation" << dendl;
