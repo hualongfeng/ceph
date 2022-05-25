@@ -74,7 +74,7 @@ static void symCallback(void *pCallbackTag,
   //{
   //  PRINT_ERR("Callback verify result error\n");
  // }
-
+  dout(10) << "fenghl pDstBuffer: " << pDstBuffer << dendl;
   if (NULL != pCallbackTag)
   {
     /** indicate that the function has been called */
@@ -82,6 +82,268 @@ static void symCallback(void *pCallbackTag,
   }
 }
 
+/**
+ *******************************************************************************
+ * @ingroup sampleUtils
+ *      This function and associated macro allocates the memory for the given
+ *      size and stores the address of the memory allocated in the pointer.
+ *      Memory allocated by this function is NOT guaranteed to be physically
+ *      contiguous.
+ *
+ * @param[out] ppMemAddr    address of pointer where address will be stored
+ * @param[in] sizeBytes     the size of the memory to be allocated
+ *
+ * @retval CPA_STATUS_RESOURCE  Macro failed to allocate Memory
+ * @retval CPA_STATUS_SUCCESS   Macro executed successfully
+ *
+ ******************************************************************************/
+static __inline CpaStatus Mem_OsMemAlloc(void **ppMemAddr, Cpa32U sizeBytes)
+{
+  *ppMemAddr = malloc(sizeBytes);
+  if (NULL == *ppMemAddr)
+  {
+      return CPA_STATUS_RESOURCE;
+  }
+  return CPA_STATUS_SUCCESS;
+}
+
+/**
+ *******************************************************************************
+ * @ingroup sampleUtils
+ *      This function and associated macro allocates the memory for the given
+ *      size for the given alignment and stores the address of the memory
+ *      allocated in the pointer. Memory allocated by this function is
+ *      guaranteed to be physically contiguous.
+ *
+ * @param[out] ppMemAddr    address of pointer where address will be stored
+ * @param[in] sizeBytes     the size of the memory to be allocated
+ * @param[in] alignement    the alignment of the memory to be allocated
+ *(non-zero)
+ *
+ * @retval CPA_STATUS_RESOURCE  Macro failed to allocate Memory
+ * @retval CPA_STATUS_SUCCESS   Macro executed successfully
+ *
+ ******************************************************************************/
+static __inline CpaStatus Mem_Alloc_Contig(void **ppMemAddr,
+                                           Cpa32U sizeBytes,
+                                           Cpa32U alignment)
+{
+  /* In this sample all allocations are done from node=0
+   * This might not be optimal in a dual processor system.
+   */
+  *ppMemAddr = qaeMemAllocNUMA(sizeBytes, 0, alignment);
+  if (NULL == *ppMemAddr)
+  {
+    return CPA_STATUS_RESOURCE;
+  }
+  return CPA_STATUS_SUCCESS;
+}
+
+
+/**
+ *******************************************************************************
+ * @ingroup sampleUtils
+ *      Macro from the Mem_OsMemAlloc function
+ *
+ ******************************************************************************/
+#define OS_MALLOC(ppMemAddr, sizeBytes)                                        \
+    Mem_OsMemAlloc((void **)(ppMemAddr), (sizeBytes))
+
+/**
+ *******************************************************************************
+ * @ingroup sampleUtils
+ *      Macro from the Mem_Alloc_Contig function
+ *
+ ******************************************************************************/
+#define PHYS_CONTIG_ALLOC(ppMemAddr, sizeBytes)                                \
+    Mem_Alloc_Contig((void **)(ppMemAddr), (sizeBytes), 1)
+
+/**
+ *******************************************************************************
+ * @ingroup sampleUtils
+ *     Algined version of PHYS_CONTIG_ALLOC() macro
+ *
+ ******************************************************************************/
+#define PHYS_CONTIG_ALLOC_ALIGNED(ppMemAddr, sizeBytes, alignment)             \
+    Mem_Alloc_Contig((void **)(ppMemAddr), (sizeBytes), (alignment))
+
+
+/**
+ *******************************************************************************
+ * @ingroup sampleUtils
+ *      This function and associated macro frees the memory at the given address
+ *      and resets the pointer to NULL. The memory must have been allocated by
+ *      the function Mem_OsMemAlloc()
+ *
+ * @param[out] ppMemAddr    address of pointer where mem address is stored.
+ *                          If pointer is NULL, the function will exit silently
+ *
+ * @retval void
+ *
+ ******************************************************************************/
+static __inline void Mem_OsMemFree(void **ppMemAddr)
+{
+  if (NULL != *ppMemAddr)
+  {
+    free(*ppMemAddr);
+    *ppMemAddr = NULL;
+  }
+}
+/**
+ *******************************************************************************
+ * @ingroup sampleUtils
+ *      This function and associated macro frees the memory at the given address
+ *      and resets the pointer to NULL. The memory must have been allocated by
+ *      the function Mem_Alloc_Contig().
+ *
+ * @param[out] ppMemAddr    address of pointer where mem address is stored.
+ *                          If pointer is NULL, the function will exit silently
+ *
+ * @retval void
+ *
+ ******************************************************************************/
+static __inline void Mem_Free_Contig(void **ppMemAddr)
+{
+
+  if (NULL != *ppMemAddr)
+  {
+    qaeMemFreeNUMA(ppMemAddr);
+    *ppMemAddr = NULL;
+  }
+}
+/**
+ *******************************************************************************
+ * @ingroup sampleUtils
+ *      Macro from the Mem_OsMemFree function
+ *
+ ******************************************************************************/
+#define OS_FREE(pMemAddr) Mem_OsMemFree((void *)&pMemAddr)
+
+/**
+ *******************************************************************************
+ * @ingroup sampleUtils
+ *      Macro from the Mem_Free_Contig function
+ *
+ ******************************************************************************/
+#define PHYS_CONTIG_FREE(pMemAddr) Mem_Free_Contig((void *)&pMemAddr)
+
+    static const size_t AES_256_IV_LEN = 16;
+    static const size_t AES_256_KEY_SIZE = 32;
+    static const size_t QCC_MAX_RETRIES = 50000;
+
+/*
+ * Perform session update
+ */
+static CpaStatus updateSession(CpaCySymSessionCtx sessionCtx,
+                               Cpa8U *pCipherKey,
+                               CpaCySymCipherDirection cipherDirection) {
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  CpaCySymSessionUpdateData sessionUpdateData = {0};
+
+  sessionUpdateData.flags = CPA_CY_SYM_SESUPD_CIPHER_KEY;
+  sessionUpdateData.flags |= CPA_CY_SYM_SESUPD_CIPHER_DIR;
+  sessionUpdateData.pCipherKey = pCipherKey;
+  sessionUpdateData.cipherDirection = cipherDirection;
+
+  status = cpaCySymUpdateSession(sessionCtx, &sessionUpdateData);
+  if (status != CPA_STATUS_SUCCESS) {
+    derr << "cpaCySymUpdateSession failed with status = " << status << dendl;
+  }
+
+  return status;
+}
+
+static CpaStatus initSession(CpaInstanceHandle cyInstHandle,
+                             CpaCySymSessionCtx *sessionCtx,
+                             Cpa8U *pCipherKey,
+                             CpaCySymCipherDirection cipherDirection) {
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  Cpa32U sessionCtxSize = 0;
+  CpaCySymSessionSetupData sessionSetupData;// = {0};
+
+  sessionSetupData.sessionPriority = CPA_CY_PRIORITY_NORMAL;
+  sessionSetupData.symOperation = CPA_CY_SYM_OP_CIPHER;
+  sessionSetupData.cipherSetupData.cipherAlgorithm = CPA_CY_SYM_CIPHER_AES_CBC;
+  sessionSetupData.cipherSetupData.cipherKeyLenInBytes = AES_256_KEY_SIZE;
+  sessionSetupData.cipherSetupData.pCipherKey = pCipherKey;
+  sessionSetupData.cipherSetupData.cipherDirection = cipherDirection;
+
+  status = cpaCySymSessionCtxGetSize(cyInstHandle, &sessionSetupData, &sessionCtxSize);
+  if (CPA_STATUS_SUCCESS == status) {
+    status = PHYS_CONTIG_ALLOC((void*)(sessionCtx), sessionCtxSize);
+  }
+  if (CPA_STATUS_SUCCESS == status) {
+    status = cpaCySymInitSession(cyInstHandle,
+                                 symCallback,
+                                 &sessionSetupData,
+                                 *sessionCtx);
+  }
+
+  return status;
+
+}
+
+static CpaStatus symPerformOp(CpaInstanceHandle cyInstHandle,
+                              CpaCySymSessionCtx sessionCtx,
+                              const Cpa8U *pSrc,
+                              Cpa32U srcLen,
+                              const Cpa8U *pIv,
+                              Cpa32U ivLen) {
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  CpaCySymOpData *opData = NULL;
+  Cpa8U *pSrcBuffer = NULL;
+  Cpa8U *pIvbuffer = NULL;
+
+  status = PHYS_CONTIG_ALLOC(&pSrcBuffer, srcLen);
+  if (CPA_STATUS_SUCCESS == status) {
+    status = PHYS_CONTIG_ALLOC(&pIvbuffer, ivLen);
+  }
+  if (CPA_STATUS_SUCCESS == status) {
+    status = PHYS_CONTIG_ALLOC_ALIGNED(&opData, sizeof(CpaCySymOpData), 8);
+  }
+  if (CPA_STATUS_SUCCESS == status) {
+    memcpy(pSrcBuffer, pSrc, srcLen);
+    memcpy(pIvbuffer, pIv, ivLen);
+  }
+
+  if (CPA_STATUS_SUCCESS == status) {
+    //OpData assignment
+    opData->sessionCtx = sessionCtx;
+    opData->packetType = CPA_CY_SYM_PACKET_TYPE_FULL;
+    opData->pIv = pIvbuffer;
+    opData->ivLenInBytes = ivLen;
+    opData->cryptoStartSrcOffsetInBytes = 0;
+    opData->messageLenToCipherInBytes = srcLen;
+  }
+
+  if (CPA_STATUS_SUCCESS == status) {
+    struct COMPLETION_STRUCT complete;
+    COMPLETION_INIT(&complete);
+    status = cpaCySymPerformOp(cyInstHandle,
+                               (void *)&complete,
+                               opData,
+                               pSrcBuffer,
+                               pSrcBuffer,
+                               NULL);
+  }
+
+  if (CPA_STATUS_SUCCESS == status) {
+    if (!COMPLETION_WAIT(&complete, TIMEOUT_MS)) {
+      derr << "timeout or interruption in cpaCySymPerformOp" << dendl;
+    }
+  }
+
+  //Copy data back to out buffer
+  memcpy(out, pSrcBuffer, size);
+
+  COMPLETION_DESTROY(&complete);
+
+  PHYS_CONTIG_FREE(pSrcBuffer);
+  PHYS_CONTIG_FREE(pIvBuffer);
+  PHYS_CONTIG_FREE(pOpData);
+
+  return status;
+}
 
 /*
  * Poller thread & functions
@@ -90,12 +352,6 @@ static std::mutex qcc_alloc_mutex;
 static std::mutex qcc_eng_mutex;
 static std::condition_variable alloc_cv;
 static std::atomic<bool> init_called = { false };
-
-void* QccCrypto::crypt_thread(void *args) {
-  struct qcc_thread_args *thread_args = (struct qcc_thread_args *)args;
-  thread_args->qccinstance->do_crypt(thread_args);
-  return thread_args;
-}
 
 void QccCrypto::QccFreeInstance(int entry) {
   std::lock_guard<std::mutex> freeinst(qcc_alloc_mutex);
@@ -347,18 +603,6 @@ bool QccCrypto::destroy() {
   return true;
 }
 
-void QccCrypto::do_crypt(qcc_thread_args *thread_args) {
-  auto entry = thread_args->entry;
-  qcc_op_mem[entry].op_result = cpaCySymPerformOp(qcc_inst->cy_inst_handles[entry],
-      NULL,
-      qcc_op_mem[entry].sym_op_data,
-      qcc_op_mem[entry].src_buff_list,
-      qcc_op_mem[entry].src_buff_list,
-      NULL);
-  qcc_op_mem[entry].op_complete = true;
-  free(thread_args);
-}
-
 bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
     size_t size, uint8_t *iv, uint8_t *key, CpaCySymCipherDirection op_type)
 {
@@ -555,6 +799,8 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
 
   //Copy data back to out buffer
   memcpy(out, qcc_op_mem[avail_inst].src_buff, size);
+  dout(10) << "fenghl src_buff: " << (void*)(qcc_op_mem[avail_inst].src_buff) << dendl;
+  dout(10) << "fenghl src_buff_list: " << (void*)(qcc_op_mem[entry].src_buff_list) << dendl;
   //Always cleanup memory holding user-data at the end
   memset(qcc_op_mem[avail_inst].iv_buff, 0, AES_256_IV_LEN);
   memset(qcc_op_mem[avail_inst].src_buff, 0, qcc_op_mem[avail_inst].buff_size);
