@@ -11,6 +11,8 @@
 #include <memory>
 extern "C" {
 #include "cpa.h"
+#include "cpa_cy_sym_dp.h"
+#include "cpa_cy_im.h"
 #include "lac/cpa_cy_sym.h"
 #include "lac/cpa_cy_im.h"
 #include "qae_mem.h"
