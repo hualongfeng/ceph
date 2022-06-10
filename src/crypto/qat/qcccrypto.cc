@@ -99,7 +99,6 @@ static void symDpCallback(CpaCySymDpOpData *pOpData,
     /** indicate that the function has been called */
     COMPLETE((struct COMPLETION_STRUCT *)pOpData->pCallbackTag);
   }
-  pOpData->pCallbackTag = (void *)1;
 }
 
 void symSessionWaitForInflightReq(CpaCySymSessionCtx pSessionCtx)
@@ -391,32 +390,25 @@ static CpaStatus symPerformOp(CpaInstanceHandle cyInstHandle,
   }
 
   if (CPA_STATUS_SUCCESS == status) {
-    status = cpaCySymDpEnqueueOp(pOpData, CPA_FALSE);
-    if (CPA_STATUS_SUCCESS != status) {
-      dout(1) << "cpaCySymDpEnqueueOp failed. (status = " << status << ")" << dendl;
-    } else {
-      status = cpaCySymDpPerformOpNow(cyInstHandle);
-      if (CPA_STATUS_SUCCESS != status) {
-        dout(1) << "cpaCySymDpPerformOpNow failed. (status = " << status << ")" << dendl;
-      } else {
-        dout(1) << "cpaCySymDpPerformOpNow succeed " << dendl;
-      }
-    }
+    status = cpaCySymDpEnqueueOp(pOpData, CPA_TRUE);
+    // status = cpaCySymDpEnqueueOp(pOpData, CPA_FALSE);
+    // if (CPA_STATUS_SUCCESS != status) {
+    //   dout(1) << "cpaCySymDpEnqueueOp failed. (status = " << status << ")" << dendl;
+    // } else {
+    //   status = cpaCySymDpPerformOpNow(cyInstHandle);
+    //   if (CPA_STATUS_SUCCESS != status) {
+    //     dout(1) << "cpaCySymDpPerformOpNow failed. (status = " << status << ")" << dendl;
+    //   } else {
+    //     dout(1) << "cpaCySymDpPerformOpNow succeed " << dendl;
+    //   }
+    // }
   }
 
-
   if (CPA_STATUS_SUCCESS == status) {
-    do
-    {
-      status = icp_sal_CyPollDpInstance(cyInstHandle, 1);
-    } while (
-            ((CPA_STATUS_SUCCESS == status) || (CPA_STATUS_RETRY == status)) &&
-            (pOpData->pCallbackTag != (void *)1));
-
-    dout(1) << "callback OK" << dendl;
     if (!COMPLETION_WAIT(&complete, TIMEOUT_MS)) {
       dout(1) << "timeout or interruption in cpaCySymPerformOp" << dendl;
     }
+    dout(1) << "callback OK" << dendl;
   }
   //Copy data back to pDst buffer
   memcpy(pDst, pDstBuffer, len);
@@ -468,12 +460,12 @@ void QccCrypto::cleanup() {
 void QccCrypto::poll_instances(void) {
   while (!thread_stop) {
     for (int iter = 0; iter < qcc_inst->num_instances; iter++) {
-      if (qcc_inst->is_polled[iter] == CPA_TRUE && qcc_op_mem[iter].op_complete) {
-        //stat = icp_sal_CyPollInstance(qcc_inst->cy_inst_handles[iter], 0);
+      if (qcc_inst->is_polled[iter] == CPA_TRUE) {
+        //stat = icp_sal_CyPollInstance(qcc_inst->cy_inst_handles[iter], 0);  //&& qcc_op_mem[iter].op_complete
         stat = icp_sal_CyPollDpInstance(qcc_inst->cy_inst_handles[iter], 0);
-        if (stat != CPA_STATUS_SUCCESS) {
-          derr << "poll instance " << iter << " failed" << dendl;
-        }
+        // if (stat != CPA_STATUS_SUCCESS) {
+        //   derr << "poll instance " << iter << " failed" << dendl;
+        // }
       }
     }
   }
@@ -891,7 +883,6 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
                       size,
                       iv,
                       AES_256_IV_LEN);
-  qcc_op_mem[avail_inst].op_complete = true;
 
   return true;
 }
