@@ -77,40 +77,7 @@ static bool setup_session(QatAccel::session_ptr &session, QzSessionParams_T &par
   return true;
 }
 
-// put the session back to the session pool in a RAII manner
-struct cached_session_t {
-  cached_session_t(QatAccel* accel, QatAccel::session_ptr&& sess)
-    : accel{accel}, session{std::move(sess)} {}
-
-  ~cached_session_t() {
-    std::scoped_lock lock{accel->mutex};
-    // if the cache size is still under its upper bound, the current session is put into
-    // accel->sessions. otherwise it's released right
-    uint64_t sessions_num = g_ceph_context->_conf.get_val<uint64_t>("qat_compressor_session_max_number");
-    if (accel->sessions.size() < sessions_num) {
-      accel->sessions.push_back(std::move(session));
-    }
-  }
-
-  struct QzSession_S* get() {
-    assert(static_cast<bool>(session));
-    return session.get();
-  }
-
-  QatAccel* accel;
-  QatAccel::session_ptr session;
-};
-
 QatAccel::session_ptr QatAccel::get_session() {
-  {
-    std::scoped_lock lock{mutex};
-    if (!sessions.empty()) {
-      auto session = std::move(sessions.back());
-      sessions.pop_back();
-      return session;
-    }
-  }
-
   // If there are no available session to use, we try allocate a new
   // session.
   QzSessionParams_T params = {(QzHuffmanHdr_T)0,};
@@ -151,21 +118,20 @@ bool QatAccel::init(const std::string &alg) {
 }
 
 int QatAccel::compress(const bufferlist &in, bufferlist &out, std::optional<int32_t> &compressor_message) {
-  auto s = get_session(); // get a session from the pool
+  thread_local auto s = get_session(); // get a session from the pool
   if (!s) {
     return -1; // session initialization failed
   }
-  auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
   compressor_message = ZLIB_DEFAULT_WIN_SIZE;
   int begin = 1;
   for (auto &i : in.buffers()) {
     const unsigned char* c_in = (unsigned char*) i.c_str();
     unsigned int len = i.length();
-    unsigned int out_len = qzMaxCompressedLength(len, session.get()) + begin;
+    unsigned int out_len = qzMaxCompressedLength(len, s.get()) + begin;
 
     bufferptr ptr = buffer::create_small_page_aligned(out_len);
     unsigned char* c_out = (unsigned char*)ptr.c_str() + begin;
-    int rc = qzCompress(session.get(), c_in, &len, c_out, &out_len, 1);
+    int rc = qzCompress(s.get(), c_in, &len, c_out, &out_len, 1);
     if (rc != QZ_OK)
       return -1;
     if (begin) {
@@ -190,11 +156,10 @@ int QatAccel::decompress(bufferlist::const_iterator &p,
 		 size_t compressed_len,
 		 bufferlist &dst,
 		 std::optional<int32_t> compressor_message) {
-  auto s = get_session(); // get a session from the pool
+  thread_local auto s = get_session(); // get a session from the pool
   if (!s) {
     return -1; // session initialization failed
   }
-  auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
   int begin = 1;
 
   int rc = 0;
@@ -218,7 +183,7 @@ int QatAccel::decompress(bufferlist::const_iterator &p,
       }
 
       ptr = buffer::create_small_page_aligned(out_len);
-      rc = qzDecompress(session.get(), (const unsigned char*)c_in, &len, (unsigned char*)ptr.c_str(), &out_len);
+      rc = qzDecompress(s.get(), (const unsigned char*)c_in, &len, (unsigned char*)ptr.c_str(), &out_len);
       ratio_idx++;
     } while (rc == QZ_BUF_ERROR && ratio_idx < std::size(expansion_ratio));
 
