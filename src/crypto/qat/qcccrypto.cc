@@ -345,13 +345,8 @@ static CpaStatus symPerformOp(CpaInstanceHandle cyInstHandle,
   CpaStatus status = CPA_STATUS_SUCCESS;
   CpaCySymDpOpData *pOpData = NULL;
   Cpa8U *pSrcBuffer = NULL;
-  Cpa8U *pDstBuffer = NULL;
   Cpa8U *pIvBuffer = NULL;
 
-  if (CPA_STATUS_SUCCESS == status)
-  {
-    status = PHYS_CONTIG_ALLOC(&pDstBuffer, len);
-  }
   if (CPA_STATUS_SUCCESS == status) {
     status = PHYS_CONTIG_ALLOC(&pSrcBuffer, len);
   }
@@ -384,7 +379,7 @@ static CpaStatus symPerformOp(CpaInstanceHandle cyInstHandle,
     pOpData->ivLenInBytes = ivLen;
     pOpData->srcBuffer = sampleVirtToPhys(pSrcBuffer);
     pOpData->srcBufferLen = len;
-    pOpData->dstBuffer = sampleVirtToPhys(pDstBuffer);
+    pOpData->dstBuffer = sampleVirtToPhys(pSrcBuffer);
     pOpData->dstBufferLen = len;
     // pOpData->packetType = CPA_CY_SYM_PACKET_TYPE_FULL;
   }
@@ -411,12 +406,11 @@ static CpaStatus symPerformOp(CpaInstanceHandle cyInstHandle,
     dout(1) << "callback OK" << dendl;
   }
   //Copy data back to pDst buffer
-  memcpy(pDst, pDstBuffer, len);
+  memcpy(pDst, pSrcBuffer, len);
 
   COMPLETION_DESTROY(&complete);
 
   PHYS_CONTIG_FREE(pSrcBuffer);
-  PHYS_CONTIG_FREE(pDstBuffer);
   PHYS_CONTIG_FREE(pIvBuffer);
   PHYS_CONTIG_FREE(pOpData);
 
