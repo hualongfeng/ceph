@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <thread>
+#include <mutex>
 #include <queue>
 #include <memory>
 extern "C" {
@@ -80,32 +81,10 @@ class QccCrypto {
       // Op common  items
       bool is_mem_alloc;
       bool op_complete;
-      CpaStatus op_result;
-      CpaCySymOpData *sym_op_data;
-      Cpa32U buff_meta_size;
-      Cpa32U num_buffers;
-      Cpa32U buff_size;
-
-      //Src data items
-      Cpa8U *src_buff_meta;
-      CpaBufferList *src_buff_list;
-      CpaFlatBuffer *src_buff_flat;
+      CpaCySymDpOpData *sym_op_data;
       Cpa8U *src_buff;
       Cpa8U *iv_buff;
     } *qcc_op_mem;
-
-    //QAT HW polling thread input structure
-    struct qcc_thread_args {
-      QccCrypto* qccinstance;
-      int entry;
-    };
-
-
-    /*
-     * Function to handle the crypt operation. Will run while the main thread
-     * runs the polling function on the instance doing the op
-     */
-    void do_crypt(qcc_thread_args *thread_args);
 
     /*
      * Handle queue with free instances to handle op
@@ -173,11 +152,23 @@ class QccCrypto {
      * associated callbacks. For synchronous operation (like this one), QAT
      * library creates an internal callback for the operation.
      */
-    static void* crypt_thread(void* entry);
-    CpaStatus QccCyStartPoll(int entry);
     void poll_instance(int entry);
 
-    pthread_t *cypollthreads;
-    static const size_t qcc_sleep_duration = 2;
+
+// CpaStatus QccCrypto::symPerformOp(CpaInstanceHandle cyInstHandle,
+    CpaStatus symPerformOp(int avail_inst,
+                              CpaCySymSessionCtx sessionCtx,
+                              const Cpa8U *pSrc,
+                              Cpa8U *pDst,
+                              Cpa32U len,
+                              const Cpa8U *pIv,
+                              Cpa32U ivLen);
+    CpaStatus initSession(CpaInstanceHandle cyInstHandle,
+                             CpaCySymSessionCtx *sessionCtx,
+                             Cpa8U *pCipherKey,
+                             CpaCySymCipherDirection cipherDirection);
+    CpaStatus updateSession(CpaCySymSessionCtx sessionCtx,
+                               Cpa8U *pCipherKey,
+                               CpaCySymCipherDirection cipherDirection);
 };
 #endif //QCCCRYPTO_H
