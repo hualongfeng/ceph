@@ -60,34 +60,12 @@ struct completion_struct
  * the verifyResult returned and sets the complete variable to indicate
  * it has been called.
  */
-// static void symCallback(void *pCallbackTag,
-//                         CpaStatus status,
-//                         const CpaCySymOp operationType,
-//                         void *pOpData,
-//                         CpaBufferList *pDstBuffer,
-//                         CpaBoolean verifyResult)
-// {
-//   //PRINT_DBG("Callback called with status = %d.\n", status);
-//   derr << "fenghl Callback called with status = " << status << dendl;
-
-//   //if (CPA_FALSE == verifyResult)
-//   //{
-//   //  PRINT_ERR("Callback verify result error\n");
-//  // }
-//   dout(10) << "fenghl pDstBuffer: " << pDstBuffer << dendl;
-//   if (NULL != pCallbackTag)
-//   {
-//     /** indicate that the function has been called */
-//     COMPLETE((struct COMPLETION_STRUCT *)pCallbackTag);
-//   }
-// }
-
 static void symDpCallback(CpaCySymDpOpData *pOpData,
                         CpaStatus status,
                         CpaBoolean verifyResult)
 {
   //PRINT_DBG("Callback called with status = %d.\n", status);
-  dout(1) << "fenghl Callback called with status = " << status << dendl;
+  dout(20) << "fenghl Callback called with status = " << status << dendl;
 
   //if (CPA_FALSE == verifyResult)
   //{
@@ -100,23 +78,6 @@ static void symDpCallback(CpaCySymDpOpData *pOpData,
     COMPLETE((struct COMPLETION_STRUCT *)pOpData->pCallbackTag);
   }
 }
-
-void symSessionWaitForInflightReq(CpaCySymSessionCtx pSessionCtx)
-{
-
-/* Session reuse is available since Cryptographic API version 2.2 */
-// #if CY_API_VERSION_AT_LEAST(2, 2)
-//     CpaBoolean sessionInUse = CPA_FALSE;
-
-//     do
-//     {
-//         cpaCySymSessionInUse(pSessionCtx, &sessionInUse);
-//     } while (sessionInUse);
-// #endif
-
-    return;
-}
-
 
 /**
  *******************************************************************************
@@ -135,287 +96,7 @@ static __inline CpaPhysicalAddr sampleVirtToPhys(void *virtAddr)
   return (CpaPhysicalAddr)qaeVirtToPhysNUMA(virtAddr);
 }
 
-
-/**
- *******************************************************************************
- * @ingroup sampleUtils
- *      This function and associated macro allocates the memory for the given
- *      size and stores the address of the memory allocated in the pointer.
- *      Memory allocated by this function is NOT guaranteed to be physically
- *      contiguous.
- *
- * @param[out] ppMemAddr    address of pointer where address will be stored
- * @param[in] sizeBytes     the size of the memory to be allocated
- *
- * @retval CPA_STATUS_RESOURCE  Macro failed to allocate Memory
- * @retval CPA_STATUS_SUCCESS   Macro executed successfully
- *
- ******************************************************************************/
-static __inline CpaStatus Mem_OsMemAlloc(void **ppMemAddr, Cpa32U sizeBytes)
-{
-  *ppMemAddr = malloc(sizeBytes);
-  if (NULL == *ppMemAddr)
-  {
-      return CPA_STATUS_RESOURCE;
-  }
-  return CPA_STATUS_SUCCESS;
-}
-
-/**
- *******************************************************************************
- * @ingroup sampleUtils
- *      This function and associated macro allocates the memory for the given
- *      size for the given alignment and stores the address of the memory
- *      allocated in the pointer. Memory allocated by this function is
- *      guaranteed to be physically contiguous.
- *
- * @param[out] ppMemAddr    address of pointer where address will be stored
- * @param[in] sizeBytes     the size of the memory to be allocated
- * @param[in] alignement    the alignment of the memory to be allocated
- *(non-zero)
- *
- * @retval CPA_STATUS_RESOURCE  Macro failed to allocate Memory
- * @retval CPA_STATUS_SUCCESS   Macro executed successfully
- *
- ******************************************************************************/
-static __inline CpaStatus Mem_Alloc_Contig(void **ppMemAddr,
-                                           Cpa32U sizeBytes,
-                                           Cpa32U alignment)
-{
-  /* In this sample all allocations are done from node=0
-   * This might not be optimal in a dual processor system.
-   */
-  *ppMemAddr = qaeMemAllocNUMA(sizeBytes, 0, alignment);
-  if (NULL == *ppMemAddr)
-  {
-    return CPA_STATUS_RESOURCE;
-  }
-  return CPA_STATUS_SUCCESS;
-}
-
-
-/**
- *******************************************************************************
- * @ingroup sampleUtils
- *      Macro from the Mem_OsMemAlloc function
- *
- ******************************************************************************/
-#define OS_MALLOC(ppMemAddr, sizeBytes)                                        \
-    Mem_OsMemAlloc((void **)(ppMemAddr), (sizeBytes))
-
-/**
- *******************************************************************************
- * @ingroup sampleUtils
- *      Macro from the Mem_Alloc_Contig function
- *
- ******************************************************************************/
-#define PHYS_CONTIG_ALLOC(ppMemAddr, sizeBytes)                                \
-    Mem_Alloc_Contig((void **)(ppMemAddr), (sizeBytes), 1)
-
-/**
- *******************************************************************************
- * @ingroup sampleUtils
- *     Algined version of PHYS_CONTIG_ALLOC() macro
- *
- ******************************************************************************/
-#define PHYS_CONTIG_ALLOC_ALIGNED(ppMemAddr, sizeBytes, alignment)             \
-    Mem_Alloc_Contig((void **)(ppMemAddr), (sizeBytes), (alignment))
-
-
-/**
- *******************************************************************************
- * @ingroup sampleUtils
- *      This function and associated macro frees the memory at the given address
- *      and resets the pointer to NULL. The memory must have been allocated by
- *      the function Mem_OsMemAlloc()
- *
- * @param[out] ppMemAddr    address of pointer where mem address is stored.
- *                          If pointer is NULL, the function will exit silently
- *
- * @retval void
- *
- ******************************************************************************/
-static __inline void Mem_OsMemFree(void **ppMemAddr)
-{
-  if (NULL != *ppMemAddr)
-  {
-    free(*ppMemAddr);
-    *ppMemAddr = NULL;
-  }
-}
-/**
- *******************************************************************************
- * @ingroup sampleUtils
- *      This function and associated macro frees the memory at the given address
- *      and resets the pointer to NULL. The memory must have been allocated by
- *      the function Mem_Alloc_Contig().
- *
- * @param[out] ppMemAddr    address of pointer where mem address is stored.
- *                          If pointer is NULL, the function will exit silently
- *
- * @retval void
- *
- ******************************************************************************/
-static __inline void Mem_Free_Contig(void **ppMemAddr)
-{
-
-  if (NULL != *ppMemAddr)
-  {
-    qaeMemFreeNUMA(ppMemAddr);
-    *ppMemAddr = NULL;
-  }
-}
-/**
- *******************************************************************************
- * @ingroup sampleUtils
- *      Macro from the Mem_OsMemFree function
- *
- ******************************************************************************/
-#define OS_FREE(pMemAddr) Mem_OsMemFree((void *)&pMemAddr)
-
-/**
- *******************************************************************************
- * @ingroup sampleUtils
- *      Macro from the Mem_Free_Contig function
- *
- ******************************************************************************/
-#define PHYS_CONTIG_FREE(pMemAddr) Mem_Free_Contig((void **)&pMemAddr)
-
-static const size_t AES_256_IV_LEN = 16;
-static const size_t AES_256_KEY_SIZE = 32;
 static const size_t QCC_MAX_RETRIES = 50000;
-
-/*
- * Perform session update
- */
-static CpaStatus updateSession(CpaCySymSessionCtx sessionCtx,
-                               Cpa8U *pCipherKey,
-                               CpaCySymCipherDirection cipherDirection) {
-  CpaStatus status = CPA_STATUS_SUCCESS;
-  CpaCySymSessionUpdateData sessionUpdateData = {0};
-
-  sessionUpdateData.flags = CPA_CY_SYM_SESUPD_CIPHER_KEY;
-  sessionUpdateData.flags |= CPA_CY_SYM_SESUPD_CIPHER_DIR;
-  sessionUpdateData.pCipherKey = pCipherKey;
-  sessionUpdateData.cipherDirection = cipherDirection;
-
-  status = cpaCySymUpdateSession(sessionCtx, &sessionUpdateData);
-  if (status != CPA_STATUS_SUCCESS) {
-    dout(1) << "cpaCySymUpdateSession failed with status = " << status << dendl;
-  }
-
-  return status;
-}
-
-static CpaStatus initSession(CpaInstanceHandle cyInstHandle,
-                             CpaCySymSessionCtx *sessionCtx,
-                             Cpa8U *pCipherKey,
-                             CpaCySymCipherDirection cipherDirection) {
-  CpaStatus status = CPA_STATUS_SUCCESS;
-  Cpa32U sessionCtxSize = 0;
-  CpaCySymSessionSetupData sessionSetupData;// = {0};
-  memset(&sessionSetupData, 0, sizeof(sessionSetupData));
-
-  sessionSetupData.sessionPriority = CPA_CY_PRIORITY_NORMAL;
-  sessionSetupData.symOperation = CPA_CY_SYM_OP_CIPHER;
-  sessionSetupData.cipherSetupData.cipherAlgorithm = CPA_CY_SYM_CIPHER_AES_CBC;
-  sessionSetupData.cipherSetupData.cipherKeyLenInBytes = AES_256_KEY_SIZE;
-  sessionSetupData.cipherSetupData.pCipherKey = pCipherKey;
-  sessionSetupData.cipherSetupData.cipherDirection = cipherDirection;
-
-  status = cpaCySymDpSessionCtxGetSize(cyInstHandle, &sessionSetupData, &sessionCtxSize);
-  if (CPA_STATUS_SUCCESS == status) {
-    status = PHYS_CONTIG_ALLOC(((void*)(sessionCtx)), sessionCtxSize); //<<<<<<<<<<<<<<
-  }
-  if (CPA_STATUS_SUCCESS == status) {
-    status = cpaCySymDpInitSession(cyInstHandle,
-                                 &sessionSetupData,
-                                 *sessionCtx);
-  }
-  return status;
-}
-
-static CpaStatus symPerformOp(CpaInstanceHandle cyInstHandle,
-                              CpaCySymSessionCtx sessionCtx,
-                              const Cpa8U *pSrc,
-                              Cpa8U *pDst,
-                              Cpa32U len,
-                              const Cpa8U *pIv,
-                              Cpa32U ivLen) {
-  CpaStatus status = CPA_STATUS_SUCCESS;
-  CpaCySymDpOpData *pOpData = NULL;
-  Cpa8U *pSrcBuffer = NULL;
-  Cpa8U *pIvBuffer = NULL;
-
-  if (CPA_STATUS_SUCCESS == status) {
-    status = PHYS_CONTIG_ALLOC(&pSrcBuffer, len);
-  }
-  if (CPA_STATUS_SUCCESS == status) {
-    status = PHYS_CONTIG_ALLOC(&pIvBuffer, ivLen);
-  }
-  if (CPA_STATUS_SUCCESS == status) {
-    status = PHYS_CONTIG_ALLOC_ALIGNED(&pOpData, sizeof(CpaCySymDpOpData), 8);
-  }
-  if (CPA_STATUS_SUCCESS == status) {
-    // copy source into buffer
-    memcpy(pSrcBuffer, pSrc, len);
-    // copy IV into buffer
-    memcpy(pIvBuffer, pIv, ivLen);
-  }
-
-  struct COMPLETION_STRUCT complete;
-  COMPLETION_INIT(&complete);
-  if (CPA_STATUS_SUCCESS == status) {
-
-    //pOpData assignment
-    pOpData->thisPhys = sampleVirtToPhys(pOpData);
-    pOpData->instanceHandle = cyInstHandle;
-    pOpData->sessionCtx = sessionCtx;
-    pOpData->pCallbackTag = (void *)&complete;
-    pOpData->cryptoStartSrcOffsetInBytes = 0;
-    pOpData->messageLenToCipherInBytes = len;
-    pOpData->iv = sampleVirtToPhys(pIvBuffer);
-    pOpData->pIv = pIvBuffer;
-    pOpData->ivLenInBytes = ivLen;
-    pOpData->srcBuffer = sampleVirtToPhys(pSrcBuffer);
-    pOpData->srcBufferLen = len;
-    pOpData->dstBuffer = sampleVirtToPhys(pSrcBuffer);
-    pOpData->dstBufferLen = len;
-    // pOpData->packetType = CPA_CY_SYM_PACKET_TYPE_FULL;
-  }
-
-  if (CPA_STATUS_SUCCESS == status) {
-    status = cpaCySymDpEnqueueOp(pOpData, CPA_TRUE);
-    // status = cpaCySymDpEnqueueOp(pOpData, CPA_FALSE);
-    // if (CPA_STATUS_SUCCESS != status) {
-    //   dout(1) << "cpaCySymDpEnqueueOp failed. (status = " << status << ")" << dendl;
-    // } else {
-    //   status = cpaCySymDpPerformOpNow(cyInstHandle);
-    //   if (CPA_STATUS_SUCCESS != status) {
-    //     dout(1) << "cpaCySymDpPerformOpNow failed. (status = " << status << ")" << dendl;
-    //   } else {
-    //     dout(1) << "cpaCySymDpPerformOpNow succeed " << dendl;
-    //   }
-    // }
-  }
-
-  if (CPA_STATUS_SUCCESS == status) {
-    if (!COMPLETION_WAIT(&complete, TIMEOUT_MS)) {
-      dout(1) << "timeout or interruption in cpaCySymPerformOp" << dendl;
-    }
-    dout(1) << "callback OK" << dendl;
-  }
-  //Copy data back to pDst buffer
-  memcpy(pDst, pSrcBuffer, len);
-
-  COMPLETION_DESTROY(&complete);
-
-  PHYS_CONTIG_FREE(pSrcBuffer);
-  PHYS_CONTIG_FREE(pIvBuffer);
-  PHYS_CONTIG_FREE(pOpData);
-
-  return status;
-}
 
 /*
  * Poller thread & functions
@@ -455,7 +136,7 @@ void QccCrypto::poll_instances(void) {
   while (!thread_stop) {
     for (int iter = 0; iter < qcc_inst->num_instances; iter++) {
       if (qcc_inst->is_polled[iter] == CPA_TRUE) {
-        //stat = icp_sal_CyPollInstance(qcc_inst->cy_inst_handles[iter], 0);  //&& qcc_op_mem[iter].op_complete
+        //&& qcc_op_mem[iter].op_complete
         stat = icp_sal_CyPollDpInstance(qcc_inst->cy_inst_handles[iter], 0);
         // if (stat != CPA_STATUS_SUCCESS) {
         //   derr << "poll instance " << iter << " failed" << dendl;
@@ -529,6 +210,7 @@ bool QccCrypto::init() {
     this->cleanup();
     return false;
   }
+  dout(1) << "Get instances num: " << qcc_inst->num_instances << dendl;
 
   int iter = 0;
   //Start Instances
@@ -572,27 +254,8 @@ bool QccCrypto::init() {
     stat = cpaCySetAddressTranslation(qcc_inst->cy_inst_handles[iter],
                                        qaeVirtToPhysNUMA);
     if(stat == CPA_STATUS_SUCCESS) {
-      // Start HW Polling Thread
-      // To-Do: Enable epoll & interrupt based later?
-      // QccCyStartPoll(iter);
-      // Setup the session structures for crypto operation and populate
-      // whatever we can now. Rest will be filled in when crypto operation
-      // happens.
-      qcc_sess[iter].sess_ctx_sz = 0;
-      qcc_sess[iter].sess_ctx = NULL;
-      qcc_sess[iter].sess_stp_data.sessionPriority = CPA_CY_PRIORITY_NORMAL;
-      qcc_sess[iter].sess_stp_data.symOperation = CPA_CY_SYM_OP_CIPHER;
       open_instances.push(iter);
       qcc_op_mem[iter].is_mem_alloc = false;
-      qcc_op_mem[iter].op_complete = false;
-      qcc_op_mem[iter].op_result = CPA_STATUS_SUCCESS;
-      qcc_op_mem[iter].sym_op_data = NULL;
-      qcc_op_mem[iter].buff_meta_size = qcc_op_mem[iter].buff_size = 0;
-      qcc_op_mem[iter].src_buff_meta = qcc_op_mem[iter].src_buff
-        = qcc_op_mem[iter].iv_buff = NULL;
-      qcc_op_mem[iter].src_buff_list = NULL;
-      qcc_op_mem[iter].src_buff_flat = NULL;
-      qcc_op_mem[iter].num_buffers = 1;
 
       stat = cpaCySymDpRegCbFunc(qcc_inst->cy_inst_handles[iter], symDpCallback);
     } else {
@@ -635,20 +298,16 @@ bool QccCrypto::destroy() {
   int iter = 0;
 
   // Free up op related memory
-  // for (iter =0; iter < qcc_inst->num_instances; iter++) {
-  //   qcc_contig_mem_free((void **)&(qcc_op_mem[iter].src_buff));
-  //   qcc_contig_mem_free((void **)&(qcc_op_mem[iter].iv_buff));
-  //   qcc_os_mem_free((void **)&(qcc_op_mem[iter].src_buff_list));
-  //   qcc_os_mem_free((void **)&(qcc_op_mem[iter].src_buff_flat));
-  //   qcc_contig_mem_free((void **)&(qcc_op_mem[iter].sym_op_data));
-  // }
+  for (iter =0; iter < qcc_inst->num_instances; iter++) {
+    qcc_contig_mem_free((void **)&(qcc_op_mem[iter].src_buff));
+    qcc_contig_mem_free((void **)&(qcc_op_mem[iter].iv_buff));
+    qcc_contig_mem_free((void **)&(qcc_op_mem[iter].sym_op_data));
+  }
 
   // Free up Session memory
   for(iter = 0; iter < qcc_inst->num_instances; iter++) {
-    // cpaCySymRemoveSession(qcc_inst->cy_inst_handles[iter], qcc_sess[iter].sess_ctx);
     cpaCySymDpRemoveSession(qcc_inst->cy_inst_handles[iter], qcc_sess[iter].sess_ctx);
-    // qcc_contig_mem_free((void **)&(qcc_sess[iter].sess_ctx));
-    PHYS_CONTIG_FREE(qcc_sess[iter].sess_ctx);
+    qcc_contig_mem_free((void **)&(qcc_sess[iter].sess_ctx));
   }
 
   // Stop QAT Instances
@@ -692,8 +351,7 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
   avail_inst = QccGetFreeInstance();
 
   dout(15) << "Using inst " << avail_inst << dendl;
-  // Start polling threads for this instance
-  //QccCyStartPoll(avail_inst);
+
 
   auto sg = make_scope_guard([=] {
       //free up the instance irrespective of the op status
@@ -707,76 +365,28 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
    * Hold onto to most of them until destructor is called.
   */
   if (qcc_op_mem[avail_inst].is_mem_alloc == false) {
+    // Allocate IV memory
+    stat = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].iv_buff), AES_256_IV_LEN, 8);
+    if(stat != CPA_STATUS_SUCCESS) {
+      derr << "Unable to allocate bufferlist memory" << dendl;
+      return false;
+    }
 
-    // qcc_sess[avail_inst].sess_stp_data.cipherSetupData.cipherAlgorithm =
-    //                                                  CPA_CY_SYM_CIPHER_AES_CBC;
-    // qcc_sess[avail_inst].sess_stp_data.cipherSetupData.cipherKeyLenInBytes =
-    //                                                           AES_256_KEY_SIZE;
+    // Allocate src memory
+    stat = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].src_buff), size, 8);
+    if(stat != CPA_STATUS_SUCCESS) {
+      derr << "Unable to allocate bufferlist memory" << dendl;
+      return false;
+    }
 
-    // // Allocate contig memory for buffers that are independent of the
-    // // input/output
-    // stat = cpaCyBufferListGetMetaSize(qcc_inst->cy_inst_handles[avail_inst],
-    //     qcc_op_mem[avail_inst].num_buffers, &(qcc_op_mem[avail_inst].buff_meta_size));
-    // if(stat != CPA_STATUS_SUCCESS) {
-    //   derr << "Unable to get buff meta size" << dendl;
-    //   return false;
-    // }
+    //Setup OpData
+    stat = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].sym_op_data),
+        sizeof(CpaCySymDpOpData), 8);
+    if(stat != CPA_STATUS_SUCCESS) {
+      derr << "Unable to allocate opdata memory" << dendl;
+      return false;
+    }
 
-    // // Allocate Buffer List Private metadata
-    // stat = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].src_buff_meta),
-    //     qcc_op_mem[avail_inst].buff_meta_size, 1);
-    // if(stat != CPA_STATUS_SUCCESS) {
-    //   derr << "Unable to allocate private metadata memory" << dendl;
-    //   return false;
-    // }
-
-    // // Allocate Buffer List Memory
-    // qcc_os_mem_alloc((void **)&(qcc_op_mem[avail_inst].src_buff_list), sizeof(CpaBufferList));
-    // qcc_os_mem_alloc((void **)&(qcc_op_mem[avail_inst].src_buff_flat),
-    //           (qcc_op_mem[avail_inst].num_buffers * sizeof(CpaFlatBuffer)));
-    // if(qcc_op_mem[avail_inst].src_buff_list == NULL || qcc_op_mem[avail_inst].src_buff_flat == NULL) {
-    //   derr << "Unable to allocate bufferlist memory" << dendl;
-    //   return false;
-    // }
-
-    // // Allocate IV memory
-    // stat = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].iv_buff), AES_256_IV_LEN);
-    // if(stat != CPA_STATUS_SUCCESS) {
-    //   derr << "Unable to allocate bufferlist memory" << dendl;
-    //   return false;
-    // }
-
-    // //Assign src stuff for the operation
-    // (qcc_op_mem[avail_inst].src_buff_list)->pBuffers = qcc_op_mem[avail_inst].src_buff_flat;
-    // (qcc_op_mem[avail_inst].src_buff_list)->numBuffers = qcc_op_mem[avail_inst].num_buffers;
-    // (qcc_op_mem[avail_inst].src_buff_list)->pPrivateMetaData = qcc_op_mem[avail_inst].src_buff_meta;
-
-    // //Setup OpData
-    // stat = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].sym_op_data),
-    //     sizeof(CpaCySymOpData));
-    // if(stat != CPA_STATUS_SUCCESS) {
-    //   derr << "Unable to allocate opdata memory" << dendl;
-    //   return false;
-    // }
-
-    // // Assuming op to be encryption for initiation. This will be reset when we
-    // // exit this block
-    // qcc_sess[avail_inst].sess_stp_data.cipherSetupData.cipherDirection =
-    //                                         CPA_CY_SYM_CIPHER_DIRECTION_ENCRYPT;
-    // // Allocate Session memory
-    // stat = cpaCySymSessionCtxGetSize(qcc_inst->cy_inst_handles[avail_inst],
-    //     &(qcc_sess[avail_inst].sess_stp_data), &(qcc_sess[avail_inst].sess_ctx_sz));
-    // if(stat != CPA_STATUS_SUCCESS) {
-    //   derr << "Unable to find session size" << dendl;
-    //   return false;
-    // }
-
-    // stat = qcc_contig_mem_alloc((void **)&(qcc_sess[avail_inst].sess_ctx),
-    //     qcc_sess[avail_inst].sess_ctx_sz);
-    // if(stat != CPA_STATUS_SUCCESS) {
-    //   derr << "Unable to allocate contig memory" << dendl;
-    //   return false;
-    // }
 
     // // Set memalloc flag so that we don't go through this exercise again.
     qcc_op_mem[avail_inst].is_mem_alloc = true;
@@ -792,85 +402,13 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
                                op_type);
   }
 
-  // // Section that runs on every call
-  // // Identify the operation and assign to session
-  // qcc_sess[avail_inst].sess_stp_data.cipherSetupData.cipherDirection = op_type;
-  // qcc_sess[avail_inst].sess_stp_data.cipherSetupData.pCipherKey = (Cpa8U *)key;
-
-  // stat = cpaCySymInitSession(qcc_inst->cy_inst_handles[avail_inst],
-  //     symCallback,
-  //     &(qcc_sess[avail_inst].sess_stp_data),
-  //     qcc_sess[avail_inst].sess_ctx);
   if (stat != CPA_STATUS_SUCCESS) {
     derr << "Unable to init session" << dendl;
     return false;
   }
 
-  // // Allocate actual buffers that will hold data
-  // if (qcc_op_mem[avail_inst].buff_size != (Cpa32U)size) {
-  //   qcc_contig_mem_free((void **)&(qcc_op_mem[avail_inst].src_buff));
-  //   qcc_op_mem[avail_inst].buff_size = (Cpa32U)size;
-  //   stat = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].src_buff),
-  //             qcc_op_mem[avail_inst].buff_size);
-  //   if(stat != CPA_STATUS_SUCCESS) {
-  //     derr << "Unable to allocate contig memory" << dendl;
-  //     return false;
-  //   }
-  // }
-
-//   // Copy src & iv into the respective buffers
-//   memcpy(qcc_op_mem[avail_inst].src_buff, in, size);
-//   memcpy(qcc_op_mem[avail_inst].iv_buff, iv, AES_256_IV_LEN);
-
-//   //Assign the reminder of the stuff
-//   qcc_op_mem[avail_inst].src_buff_flat->dataLenInBytes = qcc_op_mem[avail_inst].buff_size;
-//   qcc_op_mem[avail_inst].src_buff_flat->pData = qcc_op_mem[avail_inst].src_buff;
-
-//   //OpData assignment
-//   qcc_op_mem[avail_inst].sym_op_data->sessionCtx = qcc_sess[avail_inst].sess_ctx;
-//   qcc_op_mem[avail_inst].sym_op_data->packetType = CPA_CY_SYM_PACKET_TYPE_FULL;
-//   qcc_op_mem[avail_inst].sym_op_data->pIv = qcc_op_mem[avail_inst].iv_buff;
-//   qcc_op_mem[avail_inst].sym_op_data->ivLenInBytes = AES_256_IV_LEN;
-//   qcc_op_mem[avail_inst].sym_op_data->cryptoStartSrcOffsetInBytes = 0;
-//   qcc_op_mem[avail_inst].sym_op_data->messageLenToCipherInBytes = qcc_op_mem[avail_inst].buff_size;
-
-//   struct COMPLETION_STRUCT complete;
-//   auto entry = avail_inst;
-//   COMPLETION_INIT(&complete);
-//   qcc_op_mem[entry].op_result = cpaCySymPerformOp(qcc_inst->cy_inst_handles[entry],
-//       (void *)&complete,
-//       qcc_op_mem[entry].sym_op_data,
-//       qcc_op_mem[entry].src_buff_list,
-//       qcc_op_mem[entry].src_buff_list,
-//       NULL);
-  // qcc_op_mem[entry].op_complete = true;
-
-//   if(qcc_op_mem[avail_inst].op_result != CPA_STATUS_SUCCESS) {
-//     derr << "Unable to perform crypt operation" << dendl;
-//     return false;
-//   }
-
-
-// //  derr << "fenghl starting to wait" << dendl;
-//   if(qcc_op_mem[avail_inst].op_result == CPA_STATUS_SUCCESS) {
-//     if (!COMPLETION_WAIT(&complete, TIMEOUT_MS)) {
-//       derr << "timeout or interruption in cpaCySymPerformOp" << dendl;
-//       //return false;
-//     }
-//   }
-// //  derr << "fenghl ending to wait" << dendl;
-
-//   //Copy data back to out buffer
-//   memcpy(out, qcc_op_mem[avail_inst].src_buff, size);
-//   dout(10) << "fenghl src_buff: " << (void*)(qcc_op_mem[avail_inst].src_buff) << dendl;
-//   dout(10) << "fenghl src_buff_list: " << (void*)(qcc_op_mem[entry].src_buff_list) << dendl;
-//   //Always cleanup memory holding user-data at the end
-//   memset(qcc_op_mem[avail_inst].iv_buff, 0, AES_256_IV_LEN);
-//   memset(qcc_op_mem[avail_inst].src_buff, 0, qcc_op_mem[avail_inst].buff_size);
-
-//   COMPLETION_DESTROY(&complete);
-
-  stat = symPerformOp(qcc_inst->cy_inst_handles[avail_inst],
+  // stat = symPerformOp(qcc_inst->cy_inst_handles[avail_inst],
+  stat = symPerformOp(avail_inst,
                       qcc_sess[avail_inst].sess_ctx,
                       in,
                       out,
@@ -879,4 +417,136 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
                       AES_256_IV_LEN);
 
   return true;
+}
+
+/*
+ * Perform session update
+ */
+CpaStatus QccCrypto::updateSession(CpaCySymSessionCtx sessionCtx,
+                               Cpa8U *pCipherKey,
+                               CpaCySymCipherDirection cipherDirection) {
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  CpaCySymSessionUpdateData sessionUpdateData = {0};
+
+  sessionUpdateData.flags = CPA_CY_SYM_SESUPD_CIPHER_KEY;
+  sessionUpdateData.flags |= CPA_CY_SYM_SESUPD_CIPHER_DIR;
+  sessionUpdateData.pCipherKey = pCipherKey;
+  sessionUpdateData.cipherDirection = cipherDirection;
+
+  status = cpaCySymUpdateSession(sessionCtx, &sessionUpdateData);
+  if (status != CPA_STATUS_SUCCESS) {
+    dout(1) << "cpaCySymUpdateSession failed with status = " << status << dendl;
+  }
+
+  return status;
+}
+
+CpaStatus QccCrypto::initSession(CpaInstanceHandle cyInstHandle,
+                             CpaCySymSessionCtx *sessionCtx,
+                             Cpa8U *pCipherKey,
+                             CpaCySymCipherDirection cipherDirection) {
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  Cpa32U sessionCtxSize = 0;
+  CpaCySymSessionSetupData sessionSetupData;// = {0};
+  memset(&sessionSetupData, 0, sizeof(sessionSetupData));
+
+  sessionSetupData.sessionPriority = CPA_CY_PRIORITY_NORMAL;
+  sessionSetupData.symOperation = CPA_CY_SYM_OP_CIPHER;
+  sessionSetupData.cipherSetupData.cipherAlgorithm = CPA_CY_SYM_CIPHER_AES_CBC;
+  sessionSetupData.cipherSetupData.cipherKeyLenInBytes = AES_256_KEY_SIZE;
+  sessionSetupData.cipherSetupData.pCipherKey = pCipherKey;
+  sessionSetupData.cipherSetupData.cipherDirection = cipherDirection;
+
+  status = cpaCySymDpSessionCtxGetSize(cyInstHandle, &sessionSetupData, &sessionCtxSize);
+  if (CPA_STATUS_SUCCESS == status) {
+    status = qcc_contig_mem_alloc((void **)(sessionCtx), sessionCtxSize);   //<<<<<<<<<<<<
+  }
+  if (CPA_STATUS_SUCCESS == status) {
+    status = cpaCySymDpInitSession(cyInstHandle,
+                                 &sessionSetupData,
+                                 *sessionCtx);
+  }
+  return status;
+}
+
+// CpaStatus QccCrypto::symPerformOp(CpaInstanceHandle cyInstHandle,
+CpaStatus QccCrypto::symPerformOp(int avail_inst,
+                              CpaCySymSessionCtx sessionCtx,
+                              const Cpa8U *pSrc,
+                              Cpa8U *pDst,
+                              Cpa32U len,
+                              const Cpa8U *pIv,
+                              Cpa32U ivLen) {
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  CpaCySymDpOpData *pOpData = qcc_op_mem[avail_inst].sym_op_data;
+  Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff;
+  Cpa8U *pIvBuffer = qcc_op_mem[avail_inst].iv_buff;
+
+  // if (CPA_STATUS_SUCCESS == status) {
+  //   status = PHYS_CONTIG_ALLOC(&pSrcBuffer, len);
+  // }
+  // if (CPA_STATUS_SUCCESS == status) {
+  //   status = PHYS_CONTIG_ALLOC(&pIvBuffer, ivLen);
+  // }
+  // if (CPA_STATUS_SUCCESS == status) {
+  //   status = PHYS_CONTIG_ALLOC_ALIGNED(&pOpData, sizeof(CpaCySymDpOpData), 8);
+  // }
+  if (CPA_STATUS_SUCCESS == status) {
+    // copy source into buffer
+    memcpy(pSrcBuffer, pSrc, len);
+    // copy IV into buffer
+    memcpy(pIvBuffer, pIv, ivLen);
+  }
+
+  struct COMPLETION_STRUCT complete;
+  COMPLETION_INIT(&complete);
+  if (CPA_STATUS_SUCCESS == status) {
+
+    //pOpData assignment
+    pOpData->thisPhys = sampleVirtToPhys(pOpData);
+    pOpData->instanceHandle = qcc_inst->cy_inst_handles[avail_inst];
+    pOpData->sessionCtx = sessionCtx;
+    pOpData->pCallbackTag = (void *)&complete;
+    pOpData->cryptoStartSrcOffsetInBytes = 0;
+    pOpData->messageLenToCipherInBytes = len;
+    pOpData->iv = sampleVirtToPhys(pIvBuffer);
+    pOpData->pIv = pIvBuffer;
+    pOpData->ivLenInBytes = ivLen;
+    pOpData->srcBuffer = sampleVirtToPhys(pSrcBuffer);
+    pOpData->srcBufferLen = len;
+    pOpData->dstBuffer = sampleVirtToPhys(pSrcBuffer);
+    pOpData->dstBufferLen = len;
+  }
+
+  if (CPA_STATUS_SUCCESS == status) {
+    status = cpaCySymDpEnqueueOp(pOpData, CPA_TRUE);
+    // status = cpaCySymDpEnqueueOp(pOpData, CPA_FALSE);
+    // if (CPA_STATUS_SUCCESS != status) {
+    //   dout(1) << "cpaCySymDpEnqueueOp failed. (status = " << status << ")" << dendl;
+    // } else {
+    //   status = cpaCySymDpPerformOpNow(cyInstHandle);
+    //   if (CPA_STATUS_SUCCESS != status) {
+    //     dout(1) << "cpaCySymDpPerformOpNow failed. (status = " << status << ")" << dendl;
+    //   } else {
+    //     dout(1) << "cpaCySymDpPerformOpNow succeed " << dendl;
+    //   }
+    // }
+  }
+
+  if (CPA_STATUS_SUCCESS == status) {
+    if (!COMPLETION_WAIT(&complete, TIMEOUT_MS)) {
+      dout(1) << "timeout or interruption in cpaCySymPerformOp" << dendl;
+    }
+    // dout(1) << "callback OK" << dendl;
+  }
+  //Copy data back to pDst buffer
+  memcpy(pDst, pSrcBuffer, len);
+
+  COMPLETION_DESTROY(&complete);
+
+  // PHYS_CONTIG_FREE(pSrcBuffer);
+  // PHYS_CONTIG_FREE(pIvBuffer);
+  // PHYS_CONTIG_FREE(pOpData);
+
+  return status;
 }
