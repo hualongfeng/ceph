@@ -33,8 +33,12 @@ class QccCrypto {
     bool init();
     bool destroy();
     bool perform_op(unsigned char* out, const unsigned char* in, size_t size,
-        uint8_t *iv,
-        uint8_t *key,
+        Cpa8U *iv,
+        Cpa8U *key,
+        CpaCySymCipherDirection op_type);
+    bool perform_op_batch(unsigned char* out, const unsigned char* in, size_t chunk_size, size_t total_len,
+        Cpa8U *iv,
+        Cpa8U *key,
         CpaCySymCipherDirection op_type);
 
   private:
@@ -44,6 +48,7 @@ class QccCrypto {
     static const size_t AES_256_IV_LEN = 16;
     static const size_t AES_256_KEY_SIZE = 32;
     static const size_t QCC_MAX_RETRIES = 50000;
+    static const size_t MAX_NUM_SYM_REQ_BATCH = 32;
 
     /*
      * Struct to hold an instance of QAT to handle the crypto operations. These
@@ -67,7 +72,6 @@ class QccCrypto {
      * single crypto or multi-buffer crypto.
      */
     struct QCCSESS {
-      CpaCySymSessionSetupData sess_stp_data;
       Cpa32U sess_ctx_sz;
       CpaCySymSessionCtx sess_ctx;
     } *qcc_sess;
@@ -81,9 +85,9 @@ class QccCrypto {
       // Op common  items
       bool is_mem_alloc;
       bool op_complete;
-      CpaCySymDpOpData *sym_op_data;
-      Cpa8U *src_buff;
-      Cpa8U *iv_buff;
+      CpaCySymDpOpData *sym_op_data[MAX_NUM_SYM_REQ_BATCH];
+      Cpa8U *src_buff[MAX_NUM_SYM_REQ_BATCH];
+      Cpa8U *iv_buff[MAX_NUM_SYM_REQ_BATCH];
     } *qcc_op_mem;
 
     /*
@@ -160,9 +164,11 @@ class QccCrypto {
                               CpaCySymSessionCtx sessionCtx,
                               const Cpa8U *pSrc,
                               Cpa8U *pDst,
-                              Cpa32U len,
-                              const Cpa8U *pIv,
+                              Cpa32U chunk_size,
+                              Cpa32U total_len,
+                              Cpa8U *pIv,
                               Cpa32U ivLen);
+
     CpaStatus initSession(CpaInstanceHandle cyInstHandle,
                              CpaCySymSessionCtx *sessionCtx,
                              Cpa8U *pCipherKey,
