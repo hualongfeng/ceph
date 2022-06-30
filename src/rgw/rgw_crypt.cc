@@ -453,7 +453,8 @@ public:
         failed_to_get_crypto = true;
     }
     bool result = true;
-    if (1) {
+    static bool using_batch_mode = cct->_conf.get_val<bool>("plugin_crypto_accelerator_batch_mode");
+    if (using_batch_mode) {
       size_t iv_num = size / CHUNK_SIZE;
       if (size % CHUNK_SIZE) ++iv_num;
       auto iv = new unsigned char[iv_num][AES_256_IVSIZE];
@@ -469,24 +470,24 @@ public:
         }
       delete[] iv;
     } else {
-    unsigned char iv[AES_256_IVSIZE];
-    for (size_t offset = 0; result && (offset < size); offset += CHUNK_SIZE) {
-      size_t process_size = offset + CHUNK_SIZE <= size ? CHUNK_SIZE : size - offset;
-      prepare_iv(iv, stream_offset + offset);
-      if (crypto_accel != nullptr) {
-        if (encrypt) {
-          result = crypto_accel->cbc_encrypt(out + offset, in + offset,
-                                             process_size, iv, key);
+      unsigned char iv[AES_256_IVSIZE];
+      for (size_t offset = 0; result && (offset < size); offset += CHUNK_SIZE) {
+        size_t process_size = offset + CHUNK_SIZE <= size ? CHUNK_SIZE : size - offset;
+        prepare_iv(iv, stream_offset + offset);
+        if (crypto_accel != nullptr) {
+          if (encrypt) {
+            result = crypto_accel->cbc_encrypt(out + offset, in + offset,
+                                              process_size, iv, key);
+          } else {
+            result = crypto_accel->cbc_decrypt(out + offset, in + offset,
+                                              process_size, iv, key);
+          }
         } else {
-          result = crypto_accel->cbc_decrypt(out + offset, in + offset,
-                                             process_size, iv, key);
+          result = cbc_transform(
+              out + offset, in + offset, process_size,
+              iv, key, encrypt);
         }
-      } else {
-        result = cbc_transform(
-            out + offset, in + offset, process_size,
-            iv, key, encrypt);
       }
-    }
     }
     return result;
   }

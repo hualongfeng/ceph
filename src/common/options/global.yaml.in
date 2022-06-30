@@ -772,6 +772,12 @@ options:
   desc: Crypto accelerator library to use
   default: crypto_isal
   with_legacy: true
+- name: plugin_crypto_accelerator_batch_mode
+  type: bool
+  level: advanced
+  desc: Crypto accelerator library using batch mode
+  default: false
+  with_legacy: true
 - name: openssl_engine_opts
   type: str
   level: advanced

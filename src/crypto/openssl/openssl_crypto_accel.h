@@ -30,9 +30,9 @@ class OpenSSLCryptoAccel : public CryptoAccel {
                    const unsigned char (&key)[AES_256_KEYSIZE]) override;
   bool cbc_encrypt_batch(unsigned char* out, const unsigned char* in, size_t chunk_size, size_t total_len,
                    const unsigned char iv[][AES_256_IVSIZE],
-                   const unsigned char (&key)[AES_256_KEYSIZE]) override {}
+                   const unsigned char (&key)[AES_256_KEYSIZE]) override { return false; }
   bool cbc_decrypt_batch(unsigned char* out, const unsigned char* in, size_t chunk_size, size_t total_len,
                    const unsigned char iv[][AES_256_IVSIZE],
-                   const unsigned char (&key)[AES_256_KEYSIZE]) override {}
+                   const unsigned char (&key)[AES_256_KEYSIZE]) override { return false; }
 };
 #endif

@@ -372,7 +372,7 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
   int avail_inst = -1;
   avail_inst = QccGetFreeInstance();
 
-  dout(15) << "Using inst " << avail_inst << dendl;
+  dout(10) << "Using no_batch inst " << avail_inst << dendl;
 
 
   auto sg = make_scope_guard([=] {
@@ -465,7 +465,7 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
   int avail_inst = -1;
   avail_inst = QccGetFreeInstance();
 
-  dout(15) << "Using inst " << avail_inst << dendl;
+  dout(10) << "Using dp_batch inst " << avail_inst << dendl;
 
 
   auto sg = make_scope_guard([=] {
@@ -601,7 +601,7 @@ CpaStatus QccCrypto::symPerformOp(int avail_inst,
   COMPLETION_INIT(&complete, batch_num);
   CpaStatus status = CPA_STATUS_SUCCESS;
 
-  for (Cpa32U offset = 0, i = 0; offset < total_len && i < 32; offset += chunk_size, i++) {
+  for (Cpa32U offset = 0, i = 0; offset < total_len && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
     CpaCySymDpOpData *pOpData = qcc_op_mem[avail_inst].sym_op_data[i];
     Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
     Cpa8U *pIvBuffer = qcc_op_mem[avail_inst].iv_buff[i];
@@ -653,7 +653,7 @@ CpaStatus QccCrypto::symPerformOp(int avail_inst,
     // dout(1) << "callback OK" << dendl;
   }
   //Copy data back to pDst buffer
-  for (Cpa32U offset = 0, i = 0; offset < total_len && i < 32; offset += chunk_size, i++) {
+  for (Cpa32U offset = 0, i = 0; offset < total_len && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
     Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
     Cpa32U process_size = (((total_len - offset) > chunk_size) ? chunk_size : (total_len = offset));
     memcpy(pDst + offset, pSrcBuffer, process_size);
