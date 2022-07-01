@@ -549,8 +549,10 @@ CpaStatus QccCrypto::updateSession(CpaCySymSessionCtx sessionCtx,
   sessionUpdateData.flags |= CPA_CY_SYM_SESUPD_CIPHER_DIR;
   sessionUpdateData.pCipherKey = pCipherKey;
   sessionUpdateData.cipherDirection = cipherDirection;
+  do {
+    status = cpaCySymUpdateSession(sessionCtx, &sessionUpdateData);
+  } while(CPA_STATUS_RETRY == status);
 
-  status = cpaCySymUpdateSession(sessionCtx, &sessionUpdateData);
   if (status != CPA_STATUS_SUCCESS) {
     dout(1) << "cpaCySymUpdateSession failed with status = " << status << dendl;
   }
@@ -582,6 +584,11 @@ CpaStatus QccCrypto::initSession(CpaInstanceHandle cyInstHandle,
     status = cpaCySymDpInitSession(cyInstHandle,
                                  &sessionSetupData,
                                  *sessionCtx);
+  } else {
+    dout(1) << "Session alloc failed with status = " << status << dendl;
+  }
+  if (status != CPA_STATUS_SUCCESS) {
+    dout(1) << "cpaCySymDpInitSession failed with status = " << status << dendl;
   }
   return status;
 }
