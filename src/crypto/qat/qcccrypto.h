@@ -49,6 +49,7 @@ class QccCrypto {
     static const size_t AES_256_KEY_SIZE = 32;
     static const size_t QCC_MAX_RETRIES = 50000;
     static const size_t MAX_NUM_SYM_REQ_BATCH = 32;
+    static const size_t DATA_BUFFER_SIZE = 65536;
 
     /*
      * Struct to hold an instance of QAT to handle the crypto operations. These

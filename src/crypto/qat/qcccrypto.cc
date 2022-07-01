@@ -396,7 +396,7 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
       }
 
       // Allocate src memory
-      stat = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].src_buff[i]), 65536, 8);
+      stat = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].src_buff[i]), DATA_BUFFER_SIZE, 8);
       if(stat != CPA_STATUS_SUCCESS) {
         derr << "Unable to allocate src_buff memory" << dendl;
         return false;
@@ -489,7 +489,7 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
       }
 
       // Allocate src memory
-      stat = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].src_buff[i]), 65536, 8);
+      stat = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].src_buff[i]), DATA_BUFFER_SIZE, 8);
       if(stat != CPA_STATUS_SUCCESS) {
         derr << "Unable to allocate src_buff memory" << dendl;
         return false;
@@ -655,7 +655,7 @@ CpaStatus QccCrypto::symPerformOp(int avail_inst,
   //Copy data back to pDst buffer
   for (Cpa32U offset = 0, i = 0; offset < total_len && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
     Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
-    Cpa32U process_size = (((total_len - offset) > chunk_size) ? chunk_size : (total_len = offset));
+    Cpa32U process_size = offset + chunk_size <= total_len ? chunk_size : total_len - offset;
     memcpy(pDst + offset, pSrcBuffer, process_size);
   }
 
