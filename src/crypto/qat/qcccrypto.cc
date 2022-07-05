@@ -7,7 +7,7 @@
 #include "include/scope_guard.h"
 #include "common/dout.h"
 #include "common/errno.h"
-#include "semaphore.h"
+#include <chrono>
 
 // -----------------------------------------------------------------------------
 #define dout_context g_ceph_context
@@ -21,48 +21,55 @@ static std::ostream& _prefix(std::ostream* _dout)
 }
 // -----------------------------------------------------------------------------
 
-#define TIMEOUT_MS 500 /* 5 seconds*/
-
 /**
  *  *******************************************************************************
  *   * @ingroup sampleUtils
  *    *      Completion definitions
  *     *
  *      ******************************************************************************/
-struct completion_struct
+class CompletionHandle
 {
-  // sem_t semaphore;
+ public:
+  // static const std::chrono::seconds timeout_5s = std::chrono::seconds(5);
+  CompletionHandle(size_t count):count(count), pDst(nullptr) {};
+  CompletionHandle():count(0), pDst(nullptr) {};
+  void wait() {
+    std::unique_lock lock{mutex};
+    cv.wait(lock, [this]{return count == 0;});
+  }
+  // template<class Rep, class Period>
+  // bool wait(const std::chrono::duration<Rep, Period>& rel_time) {
+  //   std::unique_lock lock{mutex};
+  //   return cv.wait_for(lock, rel_time, [this]{return count == 0;});
+  // }
+  void complete() {
+    std::scoped_lock lock{mutex};
+    count--;
+    if (count == 0) {
+      cv.notify_one();
+    }
+  }
+  void set_dest(void *pdst, void *psrc, size_t len) {
+    this->pDst = pdst;
+    this->pSrc = psrc;
+    this->len  = len;
+    return ;
+  }
+  void copy_to_dest() {
+    if (nullptr != pDst) {
+      memcpy(pDst, pSrc, len);
+      memset(pSrc, 0, len);
+    }
+    return ;
+  }
+ private:
   std::condition_variable cv;
   std::mutex mutex;
   size_t count;
+  void *pDst;
+  void *pSrc;
+  size_t len;
 };
-/* Use semaphores to signal completion of events */
-#define COMPLETION_STRUCT completion_struct
-
-// #define COMPLETION_INIT(s) sem_init(&((s)->semaphore), 0, 0);
-#define COMPLETION_INIT(s, c) do{ \
-  std::scoped_lock lock{(s)->mutex};  \
-  (s)->count = c; \
-} while(0)
-// #define COMPLETION_INIT(s) COMPLETION_INIT(s, 1)
-
-// #define COMPLETION_WAIT(s, timeout) (sem_wait(&((s)->semaphore)) == 0)
-#define COMPLETION_WAIT(s, timeout) do{ \
-  auto ss = (s); \
-  std::unique_lock lock{ss->mutex}; \
-  ss->cv.wait(lock, [ss]{return ss->count == 0;}); \
-} while(0)
-
-// #define COMPLETE(s) sem_post(&((s)->semaphore))
-#define COMPLETE(s) do{ \
-  std::scoped_lock lock{(s)->mutex};  \
-  (s)->count--; \
-  if ((s)->count == 0) {(s)->cv.notify_one();} \
-} while(0)
-
-// #define COMPLETION_DESTROY(s) sem_destroy(&((s)->semaphore))
-#define COMPLETION_DESTROY(s)
-
 
 /*
  * Callback function
@@ -74,11 +81,6 @@ struct completion_struct
  * in a context which does not permit sleeping, e.g. a Linux bottom
  * half).
  * 
- * This function can perform whatever processing is appropriate to the
- * application.  For example, it may free memory, continue processing
- * of a decrypted packet, etc.  In this example, the function checks
- * the verifyResult returned and sets the complete variable to indicate
- * it has been called.
  */
 static void symDpCallback(CpaCySymDpOpData *pOpData,
                         CpaStatus status,
@@ -87,15 +89,12 @@ static void symDpCallback(CpaCySymDpOpData *pOpData,
   //PRINT_DBG("Callback called with status = %d.\n", status);
   dout(20) << "fenghl Callback called with status = " << status << dendl;
 
-  //if (CPA_FALSE == verifyResult)
-  //{
-  //  PRINT_ERR("Callback verify result error\n");
- // }
-
-  if (NULL != pOpData->pCallbackTag)
+  if (nullptr != pOpData->pCallbackTag)
   {
     /** indicate that the function has been called */
-    COMPLETE((struct COMPLETION_STRUCT *)pOpData->pCallbackTag);
+    auto complete = static_cast<CompletionHandle*>(pOpData->pCallbackTag);
+    complete->copy_to_dest();
+    complete->complete();
   }
 }
 
@@ -604,8 +603,7 @@ CpaStatus QccCrypto::symPerformOp(int avail_inst,
                               Cpa32U ivLen) {
   size_t batch_num = total_len / chunk_size;
   if (total_len % chunk_size) ++batch_num;
-  struct COMPLETION_STRUCT complete;
-  COMPLETION_INIT(&complete, batch_num);
+  CompletionHandle complete(batch_num);
   CpaStatus status = CPA_STATUS_SUCCESS;
 
   for (Cpa32U offset = 0, i = 0; offset < total_len && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
@@ -619,6 +617,7 @@ CpaStatus QccCrypto::symPerformOp(int avail_inst,
       // copy IV into buffer
       memcpy(pIvBuffer, &pIv[i * ivLen], ivLen);
     }
+    complete.set_dest(pDst + offset, pSrcBuffer, process_size);
 
     if (CPA_STATUS_SUCCESS == status) {
       //pOpData assignment
@@ -638,14 +637,18 @@ CpaStatus QccCrypto::symPerformOp(int avail_inst,
     }
 
     if (CPA_STATUS_SUCCESS == status) {
-      status = cpaCySymDpEnqueueOp(pOpData, CPA_FALSE);
+      do {
+        status = cpaCySymDpEnqueueOp(pOpData, CPA_FALSE);
+      } while (CPA_STATUS_RETRY == status);
       if (CPA_STATUS_SUCCESS != status) {
         dout(1) << "cpaCySymDpEnqueueOp failed. (status = " << status << ")" << dendl;
       }
     }
   }
 
-  status = cpaCySymDpPerformOpNow(qcc_inst->cy_inst_handles[avail_inst]);
+  do {
+    status = cpaCySymDpPerformOpNow(qcc_inst->cy_inst_handles[avail_inst]);
+  } while (CPA_STATUS_RETRY == status);
   if (CPA_STATUS_SUCCESS != status) {
     dout(1) << "cpaCySymDpPerformOpNow failed. (status = " << status << ")" << dendl;
   } else {
@@ -653,20 +656,7 @@ CpaStatus QccCrypto::symPerformOp(int avail_inst,
   }
 
   if (CPA_STATUS_SUCCESS == status) {
-    COMPLETION_WAIT(&complete, TIMEOUT_MS);
-    // if (!COMPLETION_WAIT(&complete, TIMEOUT_MS)) {
-    //   dout(1) << "timeout or interruption in cpaCySymPerformOp" << dendl;
-    // }
-    // dout(1) << "callback OK" << dendl;
+    complete.wait();
   }
-  //Copy data back to pDst buffer
-  for (Cpa32U offset = 0, i = 0; offset < total_len && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
-    Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
-    Cpa32U process_size = offset + chunk_size <= total_len ? chunk_size : total_len - offset;
-    memcpy(pDst + offset, pSrcBuffer, process_size);
-  }
-
-  COMPLETION_DESTROY(&complete);
-
   return status;
 }
