@@ -21,12 +21,6 @@ static std::ostream& _prefix(std::ostream* _dout)
 }
 // -----------------------------------------------------------------------------
 
-/**
- *  *******************************************************************************
- *   * @ingroup sampleUtils
- *    *      Completion definitions
- *     *
- *      ******************************************************************************/
 class CompletionHandle
 {
  public:
@@ -58,45 +52,18 @@ class CompletionHandle
 
 /*
  * Callback function
- * 
- * This function is "called back" (invoked by the implementation of
- * the API) when the asynchronous operation has completed.  The
- * context in which it is invoked depends on the implementation, but
- * as described in the API it should not sleep (since it may be called
- * in a context which does not permit sleeping, e.g. a Linux bottom
- * half).
- * 
  */
 static void symDpCallback(CpaCySymDpOpData *pOpData,
                         CpaStatus status,
                         CpaBoolean verifyResult)
 {
-  //PRINT_DBG("Callback called with status = %d.\n", status);
-  dout(20) << "fenghl Callback called with status = " << status << dendl;
+  dout(20) << "Callback called with status = " << status << dendl;
 
   if (nullptr != pOpData->pCallbackTag)
   {
-    /** indicate that the function has been called */
     auto complete = static_cast<CompletionHandle*>(pOpData->pCallbackTag);
     complete->complete();
   }
-}
-
-/**
- *******************************************************************************
- * @ingroup sampleUtils
- *      This function returns the physical address for a given virtual address.
- *      In case of error 0 is returned.
- *
- * @param[in] virtAddr     Virtual address
- *
- * @retval CpaPhysicalAddr Physical address or 0 in case of error
- *
- ******************************************************************************/
-
-static __inline CpaPhysicalAddr sampleVirtToPhys(void *virtAddr)
-{
-  return (CpaPhysicalAddr)qaeVirtToPhysNUMA(virtAddr);
 }
 
 static const size_t QCC_MAX_RETRIES = 50000;
@@ -355,9 +322,6 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
   int avail_inst = -1;
   avail_inst = QccGetFreeInstance();
 
-  dout(10) << "Using no_batch inst " << avail_inst << dendl;
-
-
   auto sg = make_scope_guard([=] {
       //free up the instance irrespective of the op status
       dout(15) << "Completed task under " << avail_inst << dendl;
@@ -604,18 +568,18 @@ CpaStatus QccCrypto::symPerformOp(int avail_inst,
 
     if (CPA_STATUS_SUCCESS == status) {
       //pOpData assignment
-      pOpData->thisPhys = sampleVirtToPhys(pOpData);
+      pOpData->thisPhys = qaeVirtToPhysNUMA(pOpData);
       pOpData->instanceHandle = qcc_inst->cy_inst_handles[avail_inst];
       pOpData->sessionCtx = sessionCtx;
       pOpData->pCallbackTag = (void *)&complete;
       pOpData->cryptoStartSrcOffsetInBytes = 0;
       pOpData->messageLenToCipherInBytes = process_size;
-      pOpData->iv = sampleVirtToPhys(pIvBuffer);
+      pOpData->iv = qaeVirtToPhysNUMA(pIvBuffer);
       pOpData->pIv = pIvBuffer;
       pOpData->ivLenInBytes = ivLen;
-      pOpData->srcBuffer = sampleVirtToPhys(pSrcBuffer);
+      pOpData->srcBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
       pOpData->srcBufferLen = process_size;
-      pOpData->dstBuffer = sampleVirtToPhys(pSrcBuffer);
+      pOpData->dstBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
       pOpData->dstBufferLen = process_size;
     }
 
