@@ -31,8 +31,8 @@ class CompletionHandle
 {
  public:
   // static const std::chrono::seconds timeout_5s = std::chrono::seconds(5);
-  CompletionHandle(size_t count):count(count), pDst(nullptr) {};
-  CompletionHandle():count(0), pDst(nullptr) {};
+  CompletionHandle(size_t count):count(count) {};
+  CompletionHandle():count(0) {};
   void wait() {
     std::unique_lock lock{mutex};
     cv.wait(lock, [this]{return count == 0;});
@@ -49,26 +49,11 @@ class CompletionHandle
       cv.notify_one();
     }
   }
-  void set_dest(void *pdst, void *psrc, size_t len) {
-    this->pDst = pdst;
-    this->pSrc = psrc;
-    this->len  = len;
-    return ;
-  }
-  void copy_to_dest() {
-    if (nullptr != pDst) {
-      memcpy(pDst, pSrc, len);
-      memset(pSrc, 0, len);
-    }
-    return ;
-  }
+
  private:
   std::condition_variable cv;
   std::mutex mutex;
   size_t count;
-  void *pDst;
-  void *pSrc;
-  size_t len;
 };
 
 /*
@@ -93,7 +78,6 @@ static void symDpCallback(CpaCySymDpOpData *pOpData,
   {
     /** indicate that the function has been called */
     auto complete = static_cast<CompletionHandle*>(pOpData->pCallbackTag);
-    complete->copy_to_dest();
     complete->complete();
   }
 }
@@ -617,7 +601,6 @@ CpaStatus QccCrypto::symPerformOp(int avail_inst,
       // copy IV into buffer
       memcpy(pIvBuffer, &pIv[i * ivLen], ivLen);
     }
-    complete.set_dest(pDst + offset, pSrcBuffer, process_size);
 
     if (CPA_STATUS_SUCCESS == status) {
       //pOpData assignment
@@ -658,5 +641,13 @@ CpaStatus QccCrypto::symPerformOp(int avail_inst,
   if (CPA_STATUS_SUCCESS == status) {
     complete.wait();
   }
+
+  // Copy data back to pDst buffer
+  for (Cpa32U offset = 0, i = 0; offset < total_len && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
+    Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
+    Cpa32U process_size = offset + chunk_size <= total_len ? chunk_size : total_len - offset;
+    memcpy(pDst + offset, pSrcBuffer, process_size);
+  }
+
   return status;
 }
