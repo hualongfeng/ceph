@@ -458,7 +458,6 @@ public:
       size_t iv_num = size / CHUNK_SIZE;
       if (size % CHUNK_SIZE) ++iv_num;
       auto iv = new unsigned char[iv_num][AES_256_IVSIZE];
-      // unsigned char iv[32][AES_256_IVSIZE];
       for (size_t offset = 0, i = 0; offset < size; offset += CHUNK_SIZE, i++) {
         prepare_iv(iv[i], stream_offset + offset);
       }

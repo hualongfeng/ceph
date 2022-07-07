@@ -8,6 +8,7 @@
 #include "common/dout.h"
 #include "common/errno.h"
 #include <chrono>
+#include <atomic>
 
 // -----------------------------------------------------------------------------
 #define dout_context g_ceph_context
@@ -44,10 +45,14 @@ class CompletionHandle
     }
   }
 
+  void add_one() {
+    count++;
+  }
+
  private:
   std::condition_variable cv;
   std::mutex mutex;
-  size_t count;
+  std::atomic<std::size_t> count;
 };
 
 /*
@@ -549,69 +554,68 @@ CpaStatus QccCrypto::symPerformOp(int avail_inst,
                               Cpa32U total_len,
                               Cpa8U *pIv,
                               Cpa32U ivLen) {
-  size_t batch_num = total_len / chunk_size;
-  if (total_len % chunk_size) ++batch_num;
-  CompletionHandle complete(batch_num);
   CpaStatus status = CPA_STATUS_SUCCESS;
+  Cpa32U one_batch_size = chunk_size * MAX_NUM_SYM_REQ_BATCH;
+  for(Cpa32U off = 0; off < total_len; off += one_batch_size) {
+    CompletionHandle complete;
+    for (Cpa32U offset = off, i = 0; offset < total_len && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
+      CpaCySymDpOpData *pOpData = qcc_op_mem[avail_inst].sym_op_data[i];
+      Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
+      Cpa8U *pIvBuffer = qcc_op_mem[avail_inst].iv_buff[i];
+      Cpa32U process_size = offset + chunk_size <= total_len ? chunk_size : total_len - offset;
+      if (CPA_STATUS_SUCCESS == status) {
+        // copy source into buffer
+        memcpy(pSrcBuffer, pSrc + offset, process_size);
+        // copy IV into buffer
+        memcpy(pIvBuffer, &pIv[i * ivLen], ivLen);
+      }
+      complete.add_one();
+      if (CPA_STATUS_SUCCESS == status) {
+        //pOpData assignment
+        pOpData->thisPhys = qaeVirtToPhysNUMA(pOpData);
+        pOpData->instanceHandle = qcc_inst->cy_inst_handles[avail_inst];
+        pOpData->sessionCtx = sessionCtx;
+        pOpData->pCallbackTag = (void *)&complete;
+        pOpData->cryptoStartSrcOffsetInBytes = 0;
+        pOpData->messageLenToCipherInBytes = process_size;
+        pOpData->iv = qaeVirtToPhysNUMA(pIvBuffer);
+        pOpData->pIv = pIvBuffer;
+        pOpData->ivLenInBytes = ivLen;
+        pOpData->srcBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
+        pOpData->srcBufferLen = process_size;
+        pOpData->dstBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
+        pOpData->dstBufferLen = process_size;
+      }
 
-  for (Cpa32U offset = 0, i = 0; offset < total_len && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
-    CpaCySymDpOpData *pOpData = qcc_op_mem[avail_inst].sym_op_data[i];
-    Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
-    Cpa8U *pIvBuffer = qcc_op_mem[avail_inst].iv_buff[i];
-    Cpa32U process_size = offset + chunk_size <= total_len ? chunk_size : total_len - offset;
-    if (CPA_STATUS_SUCCESS == status) {
-      // copy source into buffer
-      memcpy(pSrcBuffer, pSrc + offset, process_size);
-      // copy IV into buffer
-      memcpy(pIvBuffer, &pIv[i * ivLen], ivLen);
-    }
-
-    if (CPA_STATUS_SUCCESS == status) {
-      //pOpData assignment
-      pOpData->thisPhys = qaeVirtToPhysNUMA(pOpData);
-      pOpData->instanceHandle = qcc_inst->cy_inst_handles[avail_inst];
-      pOpData->sessionCtx = sessionCtx;
-      pOpData->pCallbackTag = (void *)&complete;
-      pOpData->cryptoStartSrcOffsetInBytes = 0;
-      pOpData->messageLenToCipherInBytes = process_size;
-      pOpData->iv = qaeVirtToPhysNUMA(pIvBuffer);
-      pOpData->pIv = pIvBuffer;
-      pOpData->ivLenInBytes = ivLen;
-      pOpData->srcBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
-      pOpData->srcBufferLen = process_size;
-      pOpData->dstBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
-      pOpData->dstBufferLen = process_size;
-    }
-
-    if (CPA_STATUS_SUCCESS == status) {
-      do {
-        status = cpaCySymDpEnqueueOp(pOpData, CPA_FALSE);
-      } while (CPA_STATUS_RETRY == status);
-      if (CPA_STATUS_SUCCESS != status) {
-        dout(1) << "cpaCySymDpEnqueueOp failed. (status = " << status << ")" << dendl;
+      if (CPA_STATUS_SUCCESS == status) {
+        do {
+          status = cpaCySymDpEnqueueOp(pOpData, CPA_FALSE);
+        } while (CPA_STATUS_RETRY == status);
+        if (CPA_STATUS_SUCCESS != status) {
+          dout(1) << "cpaCySymDpEnqueueOp failed. (status = " << status << ")" << dendl;
+        }
       }
     }
-  }
 
-  do {
-    status = cpaCySymDpPerformOpNow(qcc_inst->cy_inst_handles[avail_inst]);
-  } while (CPA_STATUS_RETRY == status);
-  if (CPA_STATUS_SUCCESS != status) {
-    dout(1) << "cpaCySymDpPerformOpNow failed. (status = " << status << ")" << dendl;
-  } else {
-    dout(20) << "cpaCySymDpPerformOpNow succeed " << dendl;
-  }
+    do {
+      status = cpaCySymDpPerformOpNow(qcc_inst->cy_inst_handles[avail_inst]);
+    } while (CPA_STATUS_RETRY == status);
+    if (CPA_STATUS_SUCCESS != status) {
+      dout(1) << "cpaCySymDpPerformOpNow failed. (status = " << status << ")" << dendl;
+    } else {
+      dout(20) << "cpaCySymDpPerformOpNow succeed " << dendl;
+    }
 
-  if (CPA_STATUS_SUCCESS == status) {
-    complete.wait();
-  }
+    if (CPA_STATUS_SUCCESS == status) {
+      complete.wait();
+    }
 
-  // Copy data back to pDst buffer
-  for (Cpa32U offset = 0, i = 0; offset < total_len && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
-    Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
-    Cpa32U process_size = offset + chunk_size <= total_len ? chunk_size : total_len - offset;
-    memcpy(pDst + offset, pSrcBuffer, process_size);
+    // Copy data back to pDst buffer
+    for (Cpa32U offset = 0, i = 0; offset < total_len && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
+      Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
+      Cpa32U process_size = offset + chunk_size <= total_len ? chunk_size : total_len - offset;
+      memcpy(pDst + offset, pSrcBuffer, process_size);
+    }
   }
-
   return status;
 }
