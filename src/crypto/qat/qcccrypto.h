@@ -48,7 +48,7 @@ class QccCrypto {
     static const size_t AES_256_IV_LEN = 16;
     static const size_t AES_256_KEY_SIZE = 32;
     static const size_t QCC_MAX_RETRIES = 50000;
-    static const size_t MAX_NUM_SYM_REQ_BATCH = 256;
+    static const size_t MAX_NUM_SYM_REQ_BATCH = 16;
     static const size_t DATA_BUFFER_SIZE = 4096;
 
     /*
