@@ -143,7 +143,6 @@ class QccCrypto {
     }
 
     std::atomic<bool> is_init = { false };
-    CpaStatus init_stat, stat;
 
     /*
      * Function to cleanup memory if constructor fails

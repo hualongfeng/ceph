@@ -100,7 +100,6 @@ void QccCrypto::cleanup() {
   icp_sal_userStop();
   qaeMemDestroy();
   is_init = false;
-  init_stat = stat;
   init_called = false;
   derr << "Failure during QAT init sequence. Quitting" << dendl;
 }
@@ -121,6 +120,7 @@ void QccCrypto::poll_instances(void) {
 bool QccCrypto::init() {
 
   std::lock_guard<std::mutex> l(qcc_eng_mutex);
+  CpaStatus stat = CPA_STATUS_SUCCESS;
 
   if(init_called) {
     dout(10) << "Init sequence already called. Skipping duplicate call" << dendl;
@@ -318,7 +318,7 @@ bool QccCrypto::perform_op(unsigned char* out, const unsigned char* in,
 
   if(!is_init)
   {
-    dout(10) << "QAT not initialized in this instance or init failed with possible error " << (int)init_stat << dendl;
+    dout(10) << "QAT not initialized in this instance or init failed" << dendl;
     return is_init;
   }
 
@@ -408,7 +408,7 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
 
   if(!is_init)
   {
-    dout(10) << "QAT not initialized in this instance or init failed with possible error " << (int)init_stat << dendl;
+    dout(10) << "QAT not initialized in this instance or init failed" << dendl;
     return is_init;
   }
   CpaStatus status = CPA_STATUS_SUCCESS;
