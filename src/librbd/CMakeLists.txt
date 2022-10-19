@@ -236,6 +236,7 @@ endif()
 target_link_libraries(rbd_internal PRIVATE
   osdc rbd_types
   OpenSSL::SSL)
+list(APPEND OPENSSL_INCLUDE_DIR ${QatDrv_INCLUDE_DIRS})
 target_include_directories(rbd_internal PRIVATE ${OPENSSL_INCLUDE_DIR})
 if(LINUX AND HAVE_LIBCRYPTSETUP)
   target_include_directories(rbd_internal PRIVATE ${LIBCRYPTSETUP_INCLUDE_DIR})

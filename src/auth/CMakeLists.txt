@@ -21,5 +21,8 @@ if(HAVE_GSSAPI)
 endif()
 
 add_library(common-auth-objs OBJECT ${auth_srcs})
+list(APPEND OPENSSL_INCLUDE_DIR ${QatDrv_INCLUDE_DIRS})
 target_include_directories(common-auth-objs PRIVATE ${OPENSSL_INCLUDE_DIR})
+
+
 add_dependencies(common-auth-objs legacy-option-headers)

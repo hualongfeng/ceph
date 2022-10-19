@@ -70,6 +70,11 @@ target_link_libraries(os blk)
 
 target_link_libraries(os heap_profiler kv)
 
+target_link_libraries(os QatDrv::qat_s
+	                 QatDrv::usdm_drv_s)
+
+
+
 if(WITH_BLUEFS)
   add_library(bluefs SHARED 
     bluestore/BlueRocksEnv.cc)
