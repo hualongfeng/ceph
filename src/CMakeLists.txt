@@ -497,6 +497,12 @@ if(HAVE_QATZIP)
   list(APPEND ceph_common_deps ${qatzip_LIBRARIES})
 endif()
 
+if(HAVE_QATDRV)
+  list(APPEND ceph_common_deps ${QatDrv_qat_s_LIBRARIES})
+  list(APPEND ceph_common_deps ${QatDrv_usdm_drv_s_LIBRARIES})
+  list(APPEND OPENSSL_INCLUDE_DIR ${QatDrv_INCLUDE_DIRS})
+endif()
+
 if(WITH_DPDK)
   list(APPEND ceph_common_deps common_async_dpdk)
 endif()

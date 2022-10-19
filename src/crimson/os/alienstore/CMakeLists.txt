@@ -41,6 +41,10 @@ add_library(crimson-alien-common STATIC
 target_link_libraries(crimson-alien-common
   crimson-common
   alien::cflags)
+target_link_libraries(crimson-alien-common PUBLIC QatDrv::qat_s
+	                                        PUBLIC QatDrv::usdm_drv_s)
+
+
 
 set(alien_store_srcs
   alien_store.cc
