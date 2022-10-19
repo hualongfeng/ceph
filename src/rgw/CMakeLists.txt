@@ -249,11 +249,15 @@ target_link_libraries(rgw_common
     ${ARROW_LIBRARIES}
     ${ALLOC_LIBS}
   PUBLIC
+    QatDrv::qat_s
+    QatDrv::usdm_drv_s
     ${LUA_LIBRARIES}
     spawn)
 target_include_directories(rgw_common
   PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw/services"
   PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw/store/rados"
+  PUBLIC QatDrv::usdm_drv_s
+  PUBLIC QatDrv::qat_s
   PUBLIC "${CMAKE_SOURCE_DIR}/src/rgw"
   PUBLIC "${LUA_INCLUDE_DIR}")
 if(WITH_RADOSGW_KAFKA_ENDPOINT)
