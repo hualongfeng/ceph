@@ -503,19 +503,32 @@ QatHashCommon::QatHashCommon(const CpaCySymHashAlgorithm _type)
     qat.partial = false;
   }
 
-QatHashCommon::~QatHashCommon() {
-  void *pBufferMeta = nullptr;
-  void *pSrcBuffer = nullptr;
-  void *pDigestBuffer = nullptr;
+struct CpaBufferListDeleter {
+  void operator() (CpaBufferList* pBufferList) {
+    void *pBufferMeta = nullptr;
+    void *pSrcBuffer = nullptr;
+    void *pDigestBuffer = nullptr;
 
+    if (pBufferList != nullptr) {
+      pBufferMeta   = pBufferList->pPrivateMetaData;
+      pDigestBuffer = pBufferList->pUserData;
+      pSrcBuffer    = pBufferList->pBuffers->pData;
+      qcc_contig_mem_free(&pSrcBuffer);
+      free(pBufferList);
+      qcc_contig_mem_free(&pBufferMeta);
+      qcc_contig_mem_free((void**)&pDigestBuffer);
+    }
+  }
+};
+
+using buffer_ptr = std::unique_ptr<CpaBufferList, CpaBufferListDeleter>;
+static std::vector<buffer_ptr> buffers;
+static std::mutex mutex;
+
+QatHashCommon::~QatHashCommon() {
   if (pBufferList != nullptr) {
-    pBufferMeta   = pBufferList->pPrivateMetaData;
-    pDigestBuffer = pBufferList->pUserData;
-    pSrcBuffer    = pBufferList->pBuffers->pData;
-    qcc_contig_mem_free(&pSrcBuffer);
-    free(pBufferList);
-    qcc_contig_mem_free(&pBufferMeta);
-    qcc_contig_mem_free((void**)&pDigestBuffer);
+    std::scoped_lock lock{mutex};
+    buffers.emplace_back(pBufferList);
   }
 
   if (sessionCtx != nullptr) {
@@ -567,8 +580,7 @@ void QatHashCommon::Restart() {
  **    CpaFlatBuffer   |-------pData---------------|---->|contiguous memory| pSrcBuffer
  **   -----------------|---------------------------|      -----------------------------
 *********************************************************************************************/
-
-CpaBufferList* QatHashCommon::getCpaBufferList() {
+static CpaBufferList* getCpaBufferList(CpaInstanceHandle cyInstHandle) {
 
   CpaStatus status = CPA_STATUS_SUCCESS;
   Cpa8U *pBufferMeta = nullptr;
@@ -580,6 +592,15 @@ CpaBufferList* QatHashCommon::getCpaBufferList() {
   Cpa32U bufferListMemSize = sizeof(CpaBufferList) + (numBuffers * sizeof(CpaFlatBuffer));
   Cpa8U *pSrcBuffer = nullptr;
   Cpa8U *pDigestBuffer = nullptr;
+
+  {
+    std::scoped_lock lock{mutex};
+    if (!buffers.empty()) {
+      pBufferList = buffers.back().release();
+      buffers.pop_back();
+      return pBufferList;
+    }
+  }
 
   status = cpaCyBufferListGetMetaSize(cyInstHandle, numBuffers, &bufferMetaSize);
 
@@ -601,7 +622,7 @@ CpaBufferList* QatHashCommon::getCpaBufferList() {
 
   if (CPA_STATUS_SUCCESS == status)
   {
-    status = qcc_contig_mem_alloc((void**)&pDigestBuffer, digest_length);
+    status = qcc_contig_mem_alloc((void**)&pDigestBuffer, CEPH_CRYPTO_MAX_DIGESTSIZE);
   }
 
   if (CPA_STATUS_SUCCESS == status)
@@ -635,7 +656,7 @@ void QatHashCommon::Update(const unsigned char *input, size_t length) {
   size_t current_align_left_len = 0;
 
   if (pBufferList == nullptr) {
-    pBufferList = getCpaBufferList();
+    pBufferList = getCpaBufferList(cyInstHandle);
 
     if (pBufferList == nullptr) {
       std::cout << "cannot get CpaBufferList" << std::endl;
@@ -712,7 +733,7 @@ void QatHashCommon::Final(unsigned char *digest) {
 //  std::cout << "Final start" << std::endl;
   CpaStatus status = CPA_STATUS_SUCCESS;
   if (pBufferList == nullptr) {
-    pBufferList = getCpaBufferList();
+    pBufferList = getCpaBufferList(cyInstHandle);
 
     if (pBufferList == nullptr) {
       std::cout << "cannot get CpaBufferList" << std::endl;
