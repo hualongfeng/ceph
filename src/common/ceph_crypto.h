@@ -28,6 +28,7 @@ extern "C" {
 #define CEPH_CRYPTO_HMACSHA256_DIGESTSIZE 32
 #define CEPH_CRYPTO_SHA256_DIGESTSIZE 32
 #define CEPH_CRYPTO_SHA512_DIGESTSIZE 64
+#define CEPH_CRYPTO_MAX_DIGESTSIZE CEPH_CRYPTO_SHA512_DIGESTSIZE
 
 #include <openssl/evp.h>
 #include <openssl/ossl_typ.h>
@@ -207,7 +208,6 @@ namespace TOPNSPC::crypto {
     CpaCySymSessionCtx sessionCtx{nullptr};
     CpaBufferList *pBufferList{nullptr};
     size_t digest_length{0};
-    CpaBufferList* getCpaBufferList();
     // partial packet need to align block length
     size_t block_length{0};
     unsigned char* align_left;
@@ -296,7 +296,7 @@ namespace TOPNSPC::crypto {
 }
 
 //  using ssl::SHA256;
-//  using ssl::MD5;
+  using ssl::MD5;
 //  using ssl::SHA1;
 //  using ssl::SHA512;
 
@@ -304,7 +304,7 @@ namespace TOPNSPC::crypto {
 //  using ssl::HMACSHA1;
 
   using qat::SHA256;
-  using qat::MD5;
+//  using qat::MD5;
   using qat::SHA1;
   using qat::SHA512;
 
