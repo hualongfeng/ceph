@@ -41,6 +41,7 @@
 #include <atomic>
 #include <mutex>
 #include <thread>
+#include <chrono>
 
 extern "C" {
 #include "cpa.h"
@@ -68,25 +69,6 @@ struct completion_struct
 #define COMPLETE(s) sem_post(&((s)->semaphore))
 
 #define COMPLETION_DESTROY(s) sem_destroy(&((s)->semaphore))
-
-static __inline CpaStatus msSleep(Cpa32U ms)
-{
-  int ret = 0;
-  struct timespec resTime, remTime;
-  resTime.tv_sec = ms / 1000;
-  resTime.tv_nsec = (ms % 1000) * 1000000;
-  do {
-    ret = nanosleep(&resTime, &remTime);
-    resTime = remTime;
-  } while ((ret != 0) && (errno == EINTR));
-
-  if (ret != 0) {
-    std::cout << "nanoSleep failed with code "<< ret << std::endl;
-    return CPA_STATUS_FAIL;
-  } else {
-    return CPA_STATUS_SUCCESS;
-  }
-}
 
 namespace TOPNSPC::crypto::ssl {
 
@@ -328,7 +310,6 @@ void QatInstancesManager::init() {
     throw "No instances found for 'SHIM'";
   }
 
-  //std::cout << "cpaCyStartInstance: " << numInstances << std::endl;
   for (auto &instance : cyInstances) {
     cpaCyStartInstance(instance);
     cpaCySetAddressTranslation(instance, qaeVirtToPhysNUMA);
@@ -344,8 +325,6 @@ void QatInstancesManager::init() {
       throw "One instance cannot poll, check the config";
     }
   }
-  //std::cout << "start poll instance" << std::endl;
-  //poll_thread = std::thread(&QatInstancesManager::poll_instance, this);
   poll_thread = make_named_thread("qat_hash_poll", &QatInstancesManager::poll_instance, this);
 }
 
@@ -367,7 +346,6 @@ CpaInstanceHandle QatInstancesManager::getInstance() {
   if (!inited) {
     init();
     inited = true;
-    //poll_thread = std::thread(&QatInstancesManager::poll_instance, this);
   }
   CpaInstanceHandle instance = cyInstances[index++];
   if (index >= cyInstances.size()) index = 0;
@@ -375,20 +353,12 @@ CpaInstanceHandle QatInstancesManager::getInstance() {
 }
 
 void QatInstancesManager::poll_instance() {
-  //std::cout << "start poll instance" << std::endl;
   gPollingCy = true;
   while (gPollingCy) {
     Cpa64U requestsCount = 0;
-    int cnt = 0;
     for (auto &instance : cyInstances) {
       CpaCySymStats64 stat{0};
       cpaCySymQueryStats64(instance, &stat);
-    //  std::cout << "numSymOpRequests = " << stat.numSymOpRequests
-    //            << ", numSymOpCompleted = " << stat.numSymOpCompleted
-    //            << ", numSessionsInitialized = " << stat.numSessionsInitialized
-    //            << ", numSessionsRemoved = " << stat.numSessionsRemoved
-    //	          << ", num = " << cnt++
-    //            << std::endl;
 
       requestsCount += (stat.numSymOpRequests - stat.numSymOpCompleted);
       if (stat.numSymOpRequests != stat.numSymOpCompleted) {
@@ -396,7 +366,7 @@ void QatInstancesManager::poll_instance() {
       }
     }
     if (requestsCount == 0) {
-      msSleep(1);
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
   }
 }
@@ -441,6 +411,8 @@ static Cpa32U digest_size(CpaCySymHashAlgorithm _type) {
       return CEPH_CRYPTO_SHA256_DIGESTSIZE;
     case CPA_CY_SYM_HASH_SHA512:
       return CEPH_CRYPTO_SHA512_DIGESTSIZE;
+    default:
+      return -1;
   }
   return -1;
 }
@@ -455,6 +427,8 @@ static Cpa32U block_size(CpaCySymHashAlgorithm _type) {
       return LAC_HASH_SHA256_BLOCK_SIZE;
     case CPA_CY_SYM_HASH_SHA512:
       return LAC_HASH_SHA512_BLOCK_SIZE;
+    default:
+      return -1;
   }
   return -1;
 }
@@ -463,7 +437,6 @@ static QatInstancesManager qat_instance_manager;
 
 QatHashCommon::QatHashCommon(const CpaCySymHashAlgorithm _type)
 	: cyInstHandle(qat_instance_manager.getInstance()), mpType(_type) {
-  CpaStatus status = CPA_STATUS_SUCCESS;
   digest_length = digest_size(mpType);
   block_length = block_size(mpType);
   align_left = new unsigned char[LAC_HASH_MAX_BLOCK_SIZE];
@@ -645,8 +618,6 @@ static CpaBufferList* getCpaBufferList(CpaInstanceHandle cyInstHandle) {
 }
 
 void QatHashCommon::Update(const unsigned char *input, size_t length) {
-//  std::cout << "Update input length: " << length
-//            << "align_left_len: " << align_left_len << std::endl;
   CpaStatus status = CPA_STATUS_SUCCESS;
   CpaCySymOpData pOpData = {0};
 
@@ -689,16 +660,10 @@ void QatHashCommon::Update(const unsigned char *input, size_t length) {
       memcpy(align_left + align_left_len, input, new_write_length);
       align_left_len += new_write_length;
       current_length = 0;
-//      std::cout << "Update " << "align_left_len: " << align_left_len << std::endl;
       break ;
     }
 
     input += new_write_length;
-
-//    std::cout << "Update current_length: " << current_length
-//	      << ", align_left_len: " << align_left_len
-//	      << ", new_write_length" << new_write_length
-//	      << std::endl;
 
     pBufferList->pBuffers->dataLenInBytes = current_length;
     pOpData.packetType = CPA_CY_SYM_PACKET_TYPE_PARTIAL;
@@ -749,8 +714,6 @@ void QatHashCommon::Final(unsigned char *digest) {
 
   pBufferList->pBuffers->dataLenInBytes = 0;
   if (align_left_len > 0) {
-
-//    std::cout << "align_left_len: " << align_left_len << std::endl;
     memcpy(pBufferList->pBuffers->pData, align_left, align_left_len);
     pBufferList->pBuffers->dataLenInBytes = align_left_len;
     align_left_len = 0;
@@ -788,7 +751,6 @@ void QatHashCommon::Final(unsigned char *digest) {
   COMPLETION_DESTROY(&complete);
 
   memcpy(digest, pOpData.pDigestResult, digest_length);
-//  std::cout << "Final end" << std::endl;
 }
 }
 
