@@ -264,6 +264,7 @@ class QatInstancesManager {
   std::atomic<size_t> index{0};
   std::thread poll_thread;
   volatile bool gPollingCy{false};
+  bool requiresPhysicallyContiguousMemory{true};
   void init();
   bool inited{false};
  public:
@@ -271,6 +272,9 @@ class QatInstancesManager {
   QatInstancesManager();
   ~QatInstancesManager();
   CpaInstanceHandle getInstance();
+  inline bool need_cont_mem() {
+    return requiresPhysicallyContiguousMemory;
+  }
 };
 
 QatInstancesManager::QatInstancesManager() : index(0) {}
@@ -316,7 +320,7 @@ void QatInstancesManager::init() {
     CpaInstanceInfo2 info2;
     stat = cpaCyInstanceGetInfo2(instance, &info2);
     if ((stat == CPA_STATUS_SUCCESS) && (info2.isPolled == CPA_TRUE)) {
-      /*do nothing*/
+      requiresPhysicallyContiguousMemory = info2.requiresPhysicallyContiguousMemory;
     } else {
       icp_sal_userStop();
       qaeMemDestroy();
@@ -640,30 +644,39 @@ void QatHashCommon::Update(const unsigned char *input, size_t length) {
   COMPLETION_INIT((&complete));
 
   do {
-    new_write_length = left_length > (BUFFER_SIZE - align_left_len) ? \
-	    (BUFFER_SIZE - align_left_len) : left_length;
-    current_length = new_write_length + align_left_len;
-    left_length -= new_write_length;
-
-    if (current_length % block_length == 0) {
-      memcpy(pBufferList->pBuffers->pData, align_left, align_left_len);
-      memcpy(pBufferList->pBuffers->pData + align_left_len, input, new_write_length);
-      align_left_len = 0;
-    } else if (current_length / block_length > 0){
-      memcpy(pBufferList->pBuffers->pData, align_left, align_left_len);
-      current_align_left_len = current_length % block_length;
-      memcpy(pBufferList->pBuffers->pData + align_left_len, input, new_write_length - current_align_left_len);
-      memcpy(align_left, input + new_write_length - current_align_left_len, current_align_left_len);
+    if (!qat_instance_manager.need_cont_mem() && align_left_len == 0) {
+      // Enabled SVM and align block
+      pBufferList->pBuffers->pData = const_cast<Cpa8U*>(input);
+      current_align_left_len = left_length % block_length;
+      current_length = new_write_length = left_length - current_align_left_len;
+      memcpy(align_left, input + new_write_length, current_align_left_len);
       align_left_len = current_align_left_len;
-      current_length -= align_left_len;
+      left_length = 0;
     } else {
-      memcpy(align_left + align_left_len, input, new_write_length);
-      align_left_len += new_write_length;
-      current_length = 0;
-      break ;
-    }
+      new_write_length = left_length > (BUFFER_SIZE - align_left_len) ? \
+        (BUFFER_SIZE - align_left_len) : left_length;
+      current_length = new_write_length + align_left_len;
+      left_length -= new_write_length;
 
-    input += new_write_length;
+      if (current_length % block_length == 0) {
+        memcpy(pBufferList->pBuffers->pData, align_left, align_left_len);
+        memcpy(pBufferList->pBuffers->pData + align_left_len, input, new_write_length);
+        align_left_len = 0;
+      } else if (current_length / block_length > 0){
+        memcpy(pBufferList->pBuffers->pData, align_left, align_left_len);
+        current_align_left_len = current_length % block_length;
+        memcpy(pBufferList->pBuffers->pData + align_left_len, input, new_write_length - current_align_left_len);
+        memcpy(align_left, input + new_write_length - current_align_left_len, current_align_left_len);
+        align_left_len = current_align_left_len;
+        current_length -= align_left_len;
+      } else {
+        memcpy(align_left + align_left_len, input, new_write_length);
+        align_left_len += new_write_length;
+        current_length = 0;
+        break ;
+      }
+      input += new_write_length;
+    }
 
     pBufferList->pBuffers->dataLenInBytes = current_length;
     pOpData.packetType = CPA_CY_SYM_PACKET_TYPE_PARTIAL;
