@@ -502,6 +502,41 @@ using buffer_ptr = std::unique_ptr<CpaBufferList, CpaBufferListDeleter>;
 static std::vector<buffer_ptr> buffers;
 static std::mutex mutex;
 
+struct CpaCySymSession {
+  CpaInstanceHandle _cyInstHandle{nullptr};
+  CpaCySymSessionCtx _sessionCtx{nullptr};
+
+  CpaCySymSession(CpaInstanceHandle cyInstHandle, CpaCySymSessionCtx sessionCtx):
+   _cyInstHandle(cyInstHandle), _sessionCtx(sessionCtx) {}
+
+  ~CpaCySymSession() {
+    if (_sessionCtx != nullptr) {
+      cpaCySymRemoveSession(_cyInstHandle, _sessionCtx);
+      qcc_contig_mem_free((void**)&_sessionCtx);
+      std::cout << "CpaCySymSession destruct" << std::endl;
+    }
+  }
+
+  CpaCySymSession(CpaCySymSession && session) {
+    _cyInstHandle = session._cyInstHandle;
+    _sessionCtx = session._sessionCtx;
+    session._sessionCtx = nullptr;
+    session._cyInstHandle = nullptr;
+  }
+
+  CpaCySymSession(const CpaCySymSession& session) = delete;
+
+  CpaCySymSessionCtx get_sessionCtx() {
+    CpaCySymSessionCtx sessionCtx = _sessionCtx;
+    _sessionCtx = nullptr;
+    return sessionCtx;
+  }
+
+};
+
+static std::map<CpaInstanceHandle, std::vector<CpaCySymSession>> sessions;
+static std::mutex session_mutex;
+
 QatHashCommon::~QatHashCommon() {
   if (pBufferList != nullptr) {
     std::scoped_lock lock{mutex};
@@ -509,13 +544,8 @@ QatHashCommon::~QatHashCommon() {
   }
 
   if (sessionCtx != nullptr) {
-    CpaBoolean sessionInUse = CPA_FALSE;
-    do {
-      cpaCySymSessionInUse(sessionCtx, &sessionInUse);
-    } while (sessionInUse);
-
-    cpaCySymRemoveSession(cyInstHandle, sessionCtx);
-    qcc_contig_mem_free((void**)&sessionCtx);
+    std::scoped_lock lock{session_mutex};
+    sessions[cyInstHandle].push_back(std::move(CpaCySymSession(cyInstHandle, sessionCtx)));
   }
 
   delete[] align_left;
@@ -525,8 +555,18 @@ QatHashCommon::~QatHashCommon() {
 void QatHashCommon::Restart() {
   CpaStatus status = CPA_STATUS_SUCCESS;
   Cpa32U sessionCtxSize;
+  if (sessionCtx == nullptr && !sessions[cyInstHandle].empty()) {
+    {
+      std::scoped_lock lock{session_mutex};
+      if (!sessions.empty()) {
+        sessionCtx = sessions[cyInstHandle].back().get_sessionCtx();
+        sessions[cyInstHandle].pop_back();
+      }
+    }
+  }
+
   if (sessionCtx == nullptr) {
-    // first need to alloc session memory
+    // first need to alloc session memory and not get from session pool
     status = cpaCySymSessionCtxGetSize(cyInstHandle, sessionSetupData, &sessionCtxSize);
     if (status != CPA_STATUS_SUCCESS) {
       std::cout <<  "cpaCySymSessionCtxGetSize failed, stat = " << status << std::endl;
@@ -539,7 +579,9 @@ void QatHashCommon::Restart() {
     }
   }
 
-  status = cpaCySymInitSession(cyInstHandle, symCallback, sessionSetupData, sessionCtx);
+  do {
+    status = cpaCySymInitSession(cyInstHandle, symCallback, sessionSetupData, sessionCtx);
+  } while (status == CPA_STATUS_RETRY);
   if (status != CPA_STATUS_SUCCESS) {
     std::cout << "cpaCySymInitSession failed, stat = " << status << std::endl;;
     throw "cpaCySymInitSession failed";
@@ -708,7 +750,6 @@ void QatHashCommon::Update(const unsigned char *input, size_t length) {
 }
 
 void QatHashCommon::Final(unsigned char *digest) {
-//  std::cout << "Final start" << std::endl;
   CpaStatus status = CPA_STATUS_SUCCESS;
   if (pBufferList == nullptr) {
     pBufferList = getCpaBufferList(cyInstHandle);
