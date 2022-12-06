@@ -23,6 +23,14 @@ endif()
 add_library(common-auth-objs OBJECT ${auth_srcs})
 list(APPEND OPENSSL_INCLUDE_DIR ${QatDrv_INCLUDE_DIRS})
 target_include_directories(common-auth-objs PRIVATE ${OPENSSL_INCLUDE_DIR})
+target_include_directories(common-auth-objs PUBLIC QatDrv::qat_s
+	                                    PUBLIC QatDrv::usdm_drv_s
+					    PUBLIC spawn)
+target_link_libraries(common-auth-objs PUBLIC QatDrv::qat_s
+	                               PUBLIC QatDrv::usdm_drv_s
+                                       PUBLIC spawn)
+
+
 
 
 add_dependencies(common-auth-objs legacy-option-headers)

@@ -238,6 +238,15 @@ target_link_libraries(rbd_internal PRIVATE
   OpenSSL::SSL)
 list(APPEND OPENSSL_INCLUDE_DIR ${QatDrv_INCLUDE_DIRS})
 target_include_directories(rbd_internal PRIVATE ${OPENSSL_INCLUDE_DIR})
+
+target_include_directories(rbd_internal PUBLIC QatDrv::qat_s
+	                                    PUBLIC QatDrv::usdm_drv_s
+					    PUBLIC spawn)
+target_link_libraries(rbd_internal PUBLIC QatDrv::qat_s
+                                   PUBLIC QatDrv::usdm_drv_s
+                                   PUBLIC spawn)
+
+
 if(LINUX AND HAVE_LIBCRYPTSETUP)
   target_include_directories(rbd_internal PRIVATE ${LIBCRYPTSETUP_INCLUDE_DIR})
   target_link_libraries(rbd_internal PRIVATE ${LIBCRYPTSETUP_LIBRARIES})

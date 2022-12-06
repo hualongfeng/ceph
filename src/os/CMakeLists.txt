@@ -66,12 +66,20 @@ if(HAVE_LIBZFS)
 endif()
 
 add_library(os STATIC ${libos_srcs})
+
+
+target_include_directories(os PUBLIC QatDrv::qat_s
+	                      PUBLIC QatDrv::usdm_drv_s
+			      PUBLIC spawn)
+target_link_libraries(os QatDrv::qat_s
+                         QatDrv::usdm_drv_s
+                         spawn)
+
+
+
 target_link_libraries(os blk)
 
 target_link_libraries(os heap_profiler kv)
-
-target_link_libraries(os QatDrv::qat_s
-	                 QatDrv::usdm_drv_s)
 
 
 

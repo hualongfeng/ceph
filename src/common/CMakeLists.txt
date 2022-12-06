@@ -186,7 +186,9 @@ add_library(common-common-objs OBJECT
 list(APPEND OPENSSL_INCLUDE_DIR ${QatDrv_INCLUDE_DIRS})
 target_include_directories(common-common-objs PRIVATE ${OPENSSL_INCLUDE_DIR})
 target_include_directories(common-common-objs PUBLIC QatDrv::qat_s
-                                         PUBLIC QatDrv::usdm_drv_s)
+                                         PUBLIC QatDrv::usdm_drv_s
+                                         PUBLIC spawn)
+target_link_libraries(common-common-objs PUBLIC spawn)
 
 
 # for options.cc

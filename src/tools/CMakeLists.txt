@@ -79,22 +79,22 @@ install(TARGETS ceph-kvstore-tool DESTINATION bin)
 
 set(ceph_conf_srcs ceph_conf.cc)
 add_executable(ceph-conf ${ceph_conf_srcs})
-target_link_libraries(ceph-conf global)
+target_link_libraries(ceph-conf global spawn)
 install(TARGETS ceph-conf DESTINATION bin)
 
 set(crushtool_srcs crushtool.cc)
 add_executable(crushtool ${crushtool_srcs})
-target_link_libraries(crushtool global)
+target_link_libraries(crushtool global spawn)
 install(TARGETS crushtool DESTINATION bin)
 
 set(monmaptool_srcs monmaptool.cc)
 add_executable(monmaptool ${monmaptool_srcs})
-target_link_libraries(monmaptool global)
+target_link_libraries(monmaptool global spawn)
 install(TARGETS monmaptool DESTINATION bin)
 
 set(osdomaptool_srcs osdmaptool.cc)
 add_executable(osdmaptool ${osdomaptool_srcs})
-target_link_libraries(osdmaptool global)
+target_link_libraries(osdmaptool global spawn)
 install(TARGETS osdmaptool DESTINATION bin)
 
 install(PROGRAMS crushdiff DESTINATION bin)
@@ -115,7 +115,7 @@ endif(WITH_TESTS)
 
 set(ceph_authtool_srcs ceph_authtool.cc)
 add_executable(ceph-authtool ${ceph_authtool_srcs})
-target_link_libraries(ceph-authtool global ${EXTRALIBS} ${CRYPTO_LIBS})
+target_link_libraries(ceph-authtool global ${EXTRALIBS} ${CRYPTO_LIBS} spawn)
 install(TARGETS ceph-authtool DESTINATION bin)
 
 if(WITH_TESTS)

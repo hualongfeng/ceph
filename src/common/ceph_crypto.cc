@@ -55,21 +55,6 @@ extern "C" {
 
 #define BUFFER_SIZE 131072
 
-struct completion_struct
-{
-  sem_t semaphore;
-};
-/* Use semaphores to signal completion of events */
-#define COMPLETION_STRUCT completion_struct
-
-#define COMPLETION_INIT(s) sem_init(&((s)->semaphore), 0, 0);
-
-#define COMPLETION_WAIT(s, timeout) (sem_wait(&((s)->semaphore)) == 0)
-
-#define COMPLETE(s) sem_post(&((s)->semaphore))
-
-#define COMPLETION_DESTROY(s) sem_destroy(&((s)->semaphore))
-
 namespace TOPNSPC::crypto::ssl {
 
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
@@ -390,21 +375,6 @@ static inline CpaStatus qcc_contig_mem_alloc(void **ptr, Cpa32U size, Cpa32U ali
   return CPA_STATUS_SUCCESS;
 }
 
-static void symCallback(void *pCallbackTag,
-                        CpaStatus status,
-                        const CpaCySymOp operationType,
-                        void *pOpData,
-                        CpaBufferList *pDstBuffer,
-                        CpaBoolean verifyResult)
-{
-  if (nullptr != pCallbackTag)
-  {
-    /** indicate that the function has been called*/
-    COMPLETE((struct COMPLETION_STRUCT *)pCallbackTag);
-  }
-}
-
-
 static Cpa32U digest_size(CpaCySymHashAlgorithm _type) {
   switch(_type) {
     case CPA_CY_SYM_HASH_MD5:
@@ -439,8 +409,11 @@ static Cpa32U block_size(CpaCySymHashAlgorithm _type) {
 
 static QatInstancesManager qat_instance_manager;
 
-QatHashCommon::QatHashCommon(const CpaCySymHashAlgorithm _type)
-	: cyInstHandle(qat_instance_manager.getInstance()), mpType(_type) {
+QatHashCommon::QatHashCommon(const CpaCySymHashAlgorithm _type,
+		             boost::asio::io_context& context,
+                             yield_context yield)
+	: cyInstHandle(qat_instance_manager.getInstance()), mpType(_type),
+          context(context), yield(yield) {
   digest_length = digest_size(mpType);
   block_length = block_size(mpType);
   align_left = new unsigned char[LAC_HASH_MAX_BLOCK_SIZE];
@@ -456,7 +429,8 @@ QatHashCommon::QatHashCommon(const CpaCySymHashAlgorithm _type)
 }
 
 
-  QatHashCommon::QatHashCommon(QatHashCommon &&qat) {
+  QatHashCommon::QatHashCommon(QatHashCommon &&qat):
+	  context(qat.context), yield(qat.yield) {
     cyInstHandle     = qat.cyInstHandle;
     mpType           = qat.mpType;
     sessionCtx       = qat.sessionCtx;
@@ -520,6 +494,21 @@ QatHashCommon::~QatHashCommon() {
 
   delete[] align_left;
   delete sessionSetupData;
+}
+
+void QatHashCommon::symCallback(void *pCallbackTag,
+                                CpaStatus status,
+                                const CpaCySymOp operationType,
+                                void *pOpData,
+                                CpaBufferList *pDstBuffer,
+                                CpaBoolean verifyResult)
+{
+  if (nullptr != pCallbackTag)
+  {
+    /** indicate that the function has been called*/
+    ceph::async::post(std::move(static_cast<QatHashCommon*>(pCallbackTag)->completion),
+                   boost::system::error_code{});
+  }
 }
 
 void QatHashCommon::Restart() {
@@ -621,8 +610,29 @@ static CpaBufferList* getCpaBufferList(CpaInstanceHandle cyInstHandle) {
   return pBufferList;
 }
 
-void QatHashCommon::Update(const unsigned char *input, size_t length) {
+template <typename CompletionToken>
+auto QatHashCommon::async_perform_op(CompletionToken&& token, CpaCySymOpData& pOpData)
+{
   CpaStatus status = CPA_STATUS_SUCCESS;
+  using boost::asio::async_completion;
+  using Signature = void(boost::system::error_code);
+  async_completion<CompletionToken, Signature> init(token);
+  completion = Completion::create(context.get_executor(),
+		                  std::move(init.completion_handler));
+  do {
+    status = cpaCySymPerformOp(
+    cyInstHandle,
+    (void *)this,
+    &pOpData,
+    pBufferList,
+    pBufferList,
+    NULL);
+  } while (status == CPA_STATUS_RETRY);
+
+  return init.result.get();
+}
+
+void QatHashCommon::Update(const unsigned char *input, size_t length) {
   CpaCySymOpData pOpData = {0};
 
   size_t left_length = length;
@@ -638,10 +648,6 @@ void QatHashCommon::Update(const unsigned char *input, size_t length) {
       return;
     }
   }
-
-  struct COMPLETION_STRUCT complete;
-
-  COMPLETION_INIT((&complete));
 
   do {
     if (!qat_instance_manager.need_cont_mem() && align_left_len == 0) {
@@ -684,32 +690,17 @@ void QatHashCommon::Update(const unsigned char *input, size_t length) {
     pOpData.hashStartSrcOffsetInBytes = 0;
     pOpData.messageLenToHashInBytes = current_length;
     pOpData.pDigestResult = (Cpa8U *)pBufferList->pUserData;
-    do {
-      status = cpaCySymPerformOp(
-        cyInstHandle,
-        (void *)&complete,
-        &pOpData,
-        pBufferList,
-        pBufferList,
-        NULL);
-    } while (status == CPA_STATUS_RETRY);
-    partial = true;
-    if (CPA_STATUS_SUCCESS != status) {
-      std::cout << "Update cpaCySymPerformOp failed. (status = " << status << std::endl;
-    }
 
-    if (CPA_STATUS_SUCCESS == status) {
-      if (!COMPLETION_WAIT((&complete), TIMEOUT_MS)) {
-        std::cout << "timeout or interruption in cpaCySymPerformOp" << std::endl;
-      }
-    }
+    boost::system::error_code ec;
+    // async_perform_op(yield[ec], pOpData);
+    async_perform_op(yield, pOpData);
+
+    partial = true;
   } while (left_length > 0);
-  COMPLETION_DESTROY(&complete);
 }
 
 void QatHashCommon::Final(unsigned char *digest) {
 //  std::cout << "Final start" << std::endl;
-  CpaStatus status = CPA_STATUS_SUCCESS;
   if (pBufferList == nullptr) {
     pBufferList = getCpaBufferList(cyInstHandle);
 
@@ -720,10 +711,6 @@ void QatHashCommon::Final(unsigned char *digest) {
   }
 
   CpaCySymOpData pOpData = {0};
-
-  struct COMPLETION_STRUCT complete;
-
-  COMPLETION_INIT((&complete));
 
   pBufferList->pBuffers->dataLenInBytes = 0;
   if (align_left_len > 0) {
@@ -742,26 +729,8 @@ void QatHashCommon::Final(unsigned char *digest) {
   pOpData.messageLenToHashInBytes = pBufferList->pBuffers->dataLenInBytes;
   pOpData.pDigestResult = (Cpa8U *)pBufferList->pUserData;
 
-  do {
-    status = cpaCySymPerformOp(
-      cyInstHandle,
-      (void *)&complete,
-      &pOpData,
-      pBufferList,
-      pBufferList,
-      NULL);
-
-  } while (status == CPA_STATUS_RETRY);
-  if (CPA_STATUS_SUCCESS != status) {
-    std::cout << "Final cpaCySymPerformOp failed. (status = " << status << std::endl;
-  }
-
-  if (CPA_STATUS_SUCCESS == status) {
-    if (!COMPLETION_WAIT((&complete), TIMEOUT_MS)) {
-      std::cout << "timeout or interruption in cpaCySymPerformOp" << std::endl;
-    }
-  }
-  COMPLETION_DESTROY(&complete);
+  // boost::system::error_code ec;
+  // async_perform_op(yield[ec], pOpData);
 
   memcpy(digest, pOpData.pDigestResult, digest_length);
 }

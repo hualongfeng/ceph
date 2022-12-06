@@ -49,6 +49,13 @@ target_compile_definitions(common-msg-objs PRIVATE
   $<TARGET_PROPERTY:fmt::fmt,INTERFACE_COMPILE_DEFINITIONS>)
 list(APPEND OPENSSL_INCLUDE_DIR ${QatDrv_INCLUDE_DIRS})
 target_include_directories(common-msg-objs PRIVATE ${OPENSSL_INCLUDE_DIR})
+target_include_directories(common-msg-objs PUBLIC QatDrv::qat_s
+	                                    PUBLIC QatDrv::usdm_drv_s
+					    PUBLIC spawn)
+target_link_libraries(common-msg-objs PUBLIC QatDrv::qat_s
+                                       PUBLIC QatDrv::usdm_drv_s
+                                       PUBLIC spawn)
+
 
 if(WITH_DPDK)
   set(async_dpdk_srcs

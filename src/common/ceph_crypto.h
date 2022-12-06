@@ -8,6 +8,8 @@
 #include "include/common_fwd.h"
 #include "include/buffer.h"
 #include "include/types.h"
+#include "common/async/completion.h"
+#include "common/async/yield_context.h"
 
 extern "C" {
 #include "cpa.h"
@@ -207,6 +209,7 @@ namespace TOPNSPC::crypto {
     CpaInstanceHandle cyInstHandle{nullptr};
     CpaCySymSessionCtx sessionCtx{nullptr};
     CpaBufferList *pBufferList{nullptr};
+    Cpa8U *pDigestBuffer{nullptr};
     size_t digest_length{0};
     // partial packet need to align block length
     size_t block_length{0};
@@ -216,8 +219,28 @@ namespace TOPNSPC::crypto {
    protected:
     CpaCySymSessionSetupData* sessionSetupData;
     CpaCySymHashAlgorithm mpType{CPA_CY_SYM_HASH_NONE};
+
+    static void symCallback(void *pCallbackTag,
+                            CpaStatus status,
+                            const CpaCySymOp operationType,
+                            void *pOpData,
+                            CpaBufferList *pDstBuffer,
+                            CpaBoolean verifyResult);
+
+
+   private:
+    boost::asio::io_context& context;
+    yield_context yield;
+    struct Handler;
+    using Completion = ceph::async::Completion<void(boost::system::error_code)>;
+    std::unique_ptr<Completion> completion;
+
+    template <typename CompletionToken>
+    auto async_perform_op(CompletionToken&& token, CpaCySymOpData &pOpData);
    public:
-    QatHashCommon (const CpaCySymHashAlgorithm mpType);
+    QatHashCommon (const CpaCySymHashAlgorithm mpType,
+                   boost::asio::io_context& context,
+                   yield_context yield);
     QatHashCommon (const QatHashCommon &qat) = delete;
     QatHashCommon (QatHashCommon &&qat);
     ~QatHashCommon ();
@@ -230,8 +253,10 @@ namespace TOPNSPC::crypto {
 
   class QatDigest : public QatHashCommon {
    public:
-    QatDigest (const CpaCySymHashAlgorithm mpType) :
-	  QatHashCommon(mpType) {
+    QatDigest (const CpaCySymHashAlgorithm mpType,
+               boost::asio::io_context& context,
+               yield_context yield) :
+	  QatHashCommon(mpType, context, yield) {
       this->Restart();
     }
     QatDigest (const QatDigest& qat_digest) = delete;
@@ -242,32 +267,42 @@ namespace TOPNSPC::crypto {
   class MD5 : public QatDigest {
    public:
     static constexpr size_t digest_size = CEPH_CRYPTO_MD5_DIGESTSIZE;
-    MD5() : QatDigest(CPA_CY_SYM_HASH_MD5) {}
+    MD5(boost::asio::io_context& context,
+        yield_context yield) :
+     QatDigest(CPA_CY_SYM_HASH_MD5, context, yield) {}
   };
-
+/*
   class SHA1 : public QatDigest {
    public:
     static constexpr size_t digest_size = CEPH_CRYPTO_SHA1_DIGESTSIZE;
-    SHA1() : QatDigest(CPA_CY_SYM_HASH_SHA1) {}
+    SHA1(boost::asio::io_context& context,
+         yield_context yield) :
+     QatDigest(CPA_CY_SYM_HASH_SHA1, context, yield) {}
   };
 
   class SHA256 : public QatDigest {
    public:
     static constexpr size_t digest_size = CEPH_CRYPTO_SHA256_DIGESTSIZE;
-    SHA256() : QatDigest(CPA_CY_SYM_HASH_SHA256) {}
+    SHA256(boost::asio::io_context& context,
+           yield_context yield) :
+         QatDigest(CPA_CY_SYM_HASH_SHA256, context, yield) {}
   };
 
   class SHA512 : public QatDigest {
    public:
     static constexpr size_t digest_size = CEPH_CRYPTO_SHA512_DIGESTSIZE;
-    SHA512() : QatDigest(CPA_CY_SYM_HASH_SHA512) {}
+    SHA512(boost::asio::io_context& context,
+           yield_context yield) :
+         QatDigest(CPA_CY_SYM_HASH_SHA512, context, yield) {}
   };
 
   class QatHMAC : public QatHashCommon {
    public:
     QatHMAC (const CpaCySymHashAlgorithm mpType,
-	   const unsigned char *key, size_t length) :
-	  QatHashCommon(mpType) {
+	     const unsigned char *key, size_t length,
+             boost::asio::io_context& context,
+             yield_context yield) :
+	  QatHashCommon(mpType, context, yield) {
       sessionSetupData->hashSetupData.hashMode = CPA_CY_SYM_HASH_MODE_AUTH;
       sessionSetupData->hashSetupData.authModeSetupData.authKey = const_cast<Cpa8U*>(key);
       sessionSetupData->hashSetupData.authModeSetupData.authKeyLenInBytes = length;
@@ -283,33 +318,38 @@ namespace TOPNSPC::crypto {
   class HMACSHA1 : public QatHMAC {
    public:
     static constexpr size_t digest_size = CEPH_CRYPTO_HMACSHA1_DIGESTSIZE;
-    HMACSHA1(const unsigned char *key, size_t length) :
-	  QatHMAC(CPA_CY_SYM_HASH_SHA1, key, length){}
+    HMACSHA1(const unsigned char *key, size_t length,
+             boost::asio::io_context& context,
+             yield_context yield) :
+	  QatHMAC(CPA_CY_SYM_HASH_SHA1, key, length, context, yield){}
   };
 
   class HMACSHA256 : public QatHMAC {
    public:
     static constexpr size_t digest_size = CEPH_CRYPTO_HMACSHA256_DIGESTSIZE;
-    HMACSHA256(const unsigned char *key, size_t length) :
-	  QatHMAC(CPA_CY_SYM_HASH_SHA256, key, length){}
+    HMACSHA256(const unsigned char *key, size_t length,
+             boost::asio::io_context& context,
+             yield_context yield) :
+	  QatHMAC(CPA_CY_SYM_HASH_SHA256, key, length, context, yield){}
   };
+  */
 }
 
-//  using ssl::SHA256;
+  using ssl::SHA256;
   using ssl::MD5;
-//  using ssl::SHA1;
-//  using ssl::SHA512;
+  using ssl::SHA1;
+  using ssl::SHA512;
 
-//  using ssl::HMACSHA256;
-//  using ssl::HMACSHA1;
+  using ssl::HMACSHA256;
+  using ssl::HMACSHA1;
 
-  using qat::SHA256;
+//  using qat::SHA256;
 //  using qat::MD5;
-  using qat::SHA1;
-  using qat::SHA512;
+//  using qat::SHA1;
+//  using qat::SHA512;
 
-  using qat::HMACSHA256;
-  using qat::HMACSHA1;
+//  using qat::HMACSHA256;
+//  using qat::HMACSHA1;
 
 
 
