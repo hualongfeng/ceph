@@ -17,7 +17,7 @@
 
 namespace rgw::putobj {
 
-int ChunkProcessor::process(bufferlist&& data, uint64_t offset)
+int ChunkProcessor::process(bufferlist&& data, uint64_t offset, optional_yield y)
 {
   ceph_assert(offset >= chunk.length());
   uint64_t position = offset - chunk.length();
@@ -25,12 +25,12 @@ int ChunkProcessor::process(bufferlist&& data, uint64_t offset)
   const bool flush = (data.length() == 0);
   if (flush) {
     if (chunk.length() > 0) {
-      int r = Pipe::process(std::move(chunk), position);
+      int r = Pipe::process(std::move(chunk), position, y);
       if (r < 0) {
         return r;
       }
     }
-    return Pipe::process({}, offset);
+    return Pipe::process({}, offset, y);
   }
   chunk.claim_append(data);
 
@@ -39,7 +39,7 @@ int ChunkProcessor::process(bufferlist&& data, uint64_t offset)
     bufferlist bl;
     chunk.splice(0, chunk_size, &bl);
 
-    int r = Pipe::process(std::move(bl), position);
+    int r = Pipe::process(std::move(bl), position, y);
     if (r < 0) {
       return r;
     }
@@ -49,13 +49,13 @@ int ChunkProcessor::process(bufferlist&& data, uint64_t offset)
 }
 
 
-int StripeProcessor::process(bufferlist&& data, uint64_t offset)
+int StripeProcessor::process(bufferlist&& data, uint64_t offset, optional_yield y)
 {
   ceph_assert(offset >= bounds.first);
 
   const bool flush = (data.length() == 0);
   if (flush) {
-    return Pipe::process({}, offset - bounds.first);
+    return Pipe::process({}, offset - bounds.first, y);
   }
 
   auto max = bounds.second - offset;
@@ -64,7 +64,7 @@ int StripeProcessor::process(bufferlist&& data, uint64_t offset)
       bufferlist bl;
       data.splice(0, max, &bl);
 
-      int r = Pipe::process(std::move(bl), offset - bounds.first);
+      int r = Pipe::process(std::move(bl), offset - bounds.first, y);
       if (r < 0) {
         return r;
       }
@@ -72,7 +72,7 @@ int StripeProcessor::process(bufferlist&& data, uint64_t offset)
     }
 
     // flush the current chunk
-    int r = Pipe::process({}, offset - bounds.first);
+    int r = Pipe::process({}, offset - bounds.first, y);
     if (r < 0) {
       return r;
     }
@@ -93,7 +93,7 @@ int StripeProcessor::process(bufferlist&& data, uint64_t offset)
   if (data.length() == 0) { // don't flush the chunk here
     return 0;
   }
-  return Pipe::process(std::move(data), offset - bounds.first);
+  return Pipe::process(std::move(data), offset - bounds.first, y);
 }
 
 } // namespace rgw::putobj

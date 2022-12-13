@@ -2349,7 +2349,7 @@ static const unsigned MAX_ACC_SIZE = 32 * 1024 * 1024;
 // optimal unit size for a new object, or bs for existing object (32M seems
 // enough for 4M units in 8+2 parity groups, a common config on wide pools),
 // and then launch the write operations.
-int MotrAtomicWriter::process(bufferlist&& data, uint64_t offset)
+int MotrAtomicWriter::process(bufferlist&& data, uint64_t offset, optional_yield y)
 {
   if (data.length() == 0) { // last call, flush data
     int rc = 0;
@@ -3016,7 +3016,7 @@ int MotrMultipartWriter::prepare(optional_yield y)
   return rc;
 }
 
-int MotrMultipartWriter::process(bufferlist&& data, uint64_t offset)
+int MotrMultipartWriter::process(bufferlist&& data, uint64_t offset, optional_yield y)
 {
   int rc = part_obj->write_mobj(dpp, std::move(data), offset);
   if (rc == 0) {

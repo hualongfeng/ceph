@@ -1914,7 +1914,7 @@ namespace rgw {
       return 0;
 
     hash.Update((const unsigned char *)data.c_str(), data.length());
-    op_ret = filter->process(std::move(data), ofs);
+    op_ret = filter->process(std::move(data), ofs, state->yield);
     if (op_ret < 0) {
       goto done;
     }
@@ -1941,7 +1941,7 @@ namespace rgw {
     perfcounter->inc(l_rgw_put_b, state->obj_size);
 
     // flush data in filters
-    op_ret = filter->process({}, state->obj_size);
+    op_ret = filter->process({}, state->obj_size, state->yield);
     if (op_ret < 0) {
       goto done;
     }

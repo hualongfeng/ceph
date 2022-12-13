@@ -8,6 +8,7 @@
 #include "common/dout.h"
 #include "common/errno.h"
 #include <atomic>
+#include <utility>
 
 // -----------------------------------------------------------------------------
 #define dout_context g_ceph_context
@@ -21,33 +22,6 @@ static std::ostream& _prefix(std::ostream* _dout)
 }
 // -----------------------------------------------------------------------------
 
-class CompletionHandle
-{
- public:
-  CompletionHandle(size_t count):count(count) {};
-  CompletionHandle():count(0) {};
-  void wait() {
-    std::unique_lock lock{mutex};
-    cv.wait(lock, [this]{return count == 0;});
-  }
-  void complete() {
-    std::scoped_lock lock{mutex};
-    count--;
-    if (count == 0) {
-      cv.notify_one();
-    }
-  }
-
-  void add_one() {
-    count++;
-  }
-
- private:
-  std::condition_variable cv;
-  std::mutex mutex;
-  std::atomic<std::size_t> count;
-};
-
 /*
  * Callback function
  */
@@ -57,29 +31,50 @@ static void symDpCallback(CpaCySymDpOpData *pOpData,
 {
   if (nullptr != pOpData->pCallbackTag)
   {
-    auto complete = static_cast<CompletionHandle*>(pOpData->pCallbackTag);
-    complete->complete();
+    if (static_cast<QatCrypto*>(pOpData->pCallbackTag)->complete()) {
+      static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion_handler(boost::system::error_code{});
+    }
   }
 }
 
 static std::mutex qcc_alloc_mutex;
 static std::mutex qcc_eng_mutex;
-static std::condition_variable alloc_cv;
 static std::atomic<bool> init_called = { false };
 
-void QccCrypto::QccFreeInstance(int entry) {
-  std::lock_guard<std::mutex> freeinst(qcc_alloc_mutex);
-  open_instances.push(entry);
-  alloc_cv.notify_one();
+
+
+template <typename CompletionToken>
+auto QccCrypto::async_get_instance(CompletionToken&& token) {
+  using boost::asio::async_completion;
+  using Signature = void(int);
+  async_completion<CompletionToken, Signature> init(token);
+
+  auto ex = boost::asio::get_associated_executor(init.completion_handler);
+
+  boost::asio::post(my_context, [this, ex, handler = std::move(init.completion_handler)]()mutable{
+    auto handler1 = std::move(handler);
+    if (!open_instances.empty()) {
+      int avail_inst = open_instances.front();
+      open_instances.pop();
+      boost::asio::post(ex, std::bind(handler1, avail_inst));
+    } else {
+      instance_completions.push([this, ex, handler2 = std::move(handler1)](int inst)mutable{
+        boost::asio::post(ex, std::bind(handler2, inst));
+      });
+    }
+  });
+  return init.result.get();
 }
 
-int QccCrypto::QccGetFreeInstance() {
-  int ret = -1;
-  std::unique_lock getinst(qcc_alloc_mutex);
-  alloc_cv.wait(getinst, [this](){return !open_instances.empty();});
-  ret = open_instances.front();
-  open_instances.pop();
-  return ret;
+void QccCrypto::QccFreeInstance(int entry) {
+  boost::asio::post(my_context, [this, entry]()mutable{
+    if (!instance_completions.empty()) {
+      instance_completions.front()(entry);
+      instance_completions.pop();
+    } else {
+      open_instances.push(entry);
+    }
+  });
 }
 
 void QccCrypto::cleanup() {
@@ -226,9 +221,16 @@ bool QccCrypto::init(const size_t chunk_size) {
   }
 
   qat_poll_thread = make_named_thread("qat_poll", &QccCrypto::poll_instances, this);
+  
+  work_guard = std::make_unique<work_guard_type>(my_context.get_executor());
+  qat_context_thread = make_named_thread("qat_context", &QccCrypto::my_context_run, this);
   is_init = true;
   dout(10) << "Init complete" << dendl;
   return true;
+}
+
+void QccCrypto::my_context_run() {
+  my_context.run();
 }
 
 bool QccCrypto::destroy() {
@@ -237,15 +239,13 @@ bool QccCrypto::destroy() {
     return false;
   }
 
-  {
-    std::unique_lock getinst(qcc_alloc_mutex);
-    // waiting for all instance being free
-    alloc_cv.wait(getinst, [this](){return (open_instances.size() == qcc_inst->num_instances);});
-  }
-
   thread_stop = true;
   if (qat_poll_thread.joinable()) {
     qat_poll_thread.join();
+  }
+  my_context.stop();
+  if (qat_context_thread.joinable()) {
+    qat_context_thread.join();
   }
 
   dout(10) << "Destroying QAT crypto & related memory" << dendl;
@@ -289,7 +289,8 @@ bool QccCrypto::destroy() {
 bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, size_t size,
     Cpa8U *iv,
     Cpa8U *key,
-    CpaCySymCipherDirection op_type)
+    CpaCySymCipherDirection op_type,
+    optional_yield y)
 {
   if (!init_called) {
     dout(10) << "QAT not intialized yet. Initializing now..." << dendl;
@@ -306,12 +307,13 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
   }
   CpaStatus status = CPA_STATUS_SUCCESS;
   int avail_inst = -1;
-  avail_inst = QccGetFreeInstance();
 
-  dout(10) << "Using dp_batch inst " << avail_inst << dendl;
+  yield_context yield = y.get_yield_context();
+  avail_inst = async_get_instance(yield);
 
+  dout(1) << "Using dp_batch inst " << avail_inst << dendl;
 
-  auto sg = make_scope_guard([=] {
+  auto sg = make_scope_guard([this, avail_inst] {
       //free up the instance irrespective of the op status
       dout(15) << "Completed task under " << avail_inst << dendl;
       qcc_op_mem[avail_inst].op_complete = false;
@@ -349,17 +351,25 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
 
     // Set memalloc flag so that we don't go through this exercise again.
     qcc_op_mem[avail_inst].is_mem_alloc = true;
-
+    qcc_sess[avail_inst].sess_ctx = nullptr;
     status = initSession(qcc_inst->cy_inst_handles[avail_inst],
                              &(qcc_sess[avail_inst].sess_ctx),
                              (Cpa8U *)key,
                              op_type);
   } else {
-    status = updateSession(qcc_sess[avail_inst].sess_ctx,
-                               (Cpa8U *)key,
-                               op_type);
+    do {
+      status = updateSession(qcc_sess[avail_inst].sess_ctx,
+                                (Cpa8U *)key,
+                                op_type);
+      if (status == CPA_STATUS_RETRY) {
+        cpaCySymDpRemoveSession(qcc_inst->cy_inst_handles[avail_inst], qcc_sess[avail_inst].sess_ctx);
+        status = initSession(qcc_inst->cy_inst_handles[avail_inst],
+                             &(qcc_sess[avail_inst].sess_ctx),
+                             (Cpa8U *)key,
+                             op_type);
+      }
+    } while (status == CPA_STATUS_RETRY);
   }
-
   if (unlikely(status != CPA_STATUS_SUCCESS)) {
     derr << "Unable to init session with status =" << status << dendl;
     return false;
@@ -371,7 +381,7 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
                       out,
                       size,
                       reinterpret_cast<Cpa8U*>(iv),
-                      AES_256_IV_LEN);
+                      AES_256_IV_LEN, y);
 }
 
 /*
@@ -388,9 +398,7 @@ CpaStatus QccCrypto::updateSession(CpaCySymSessionCtx sessionCtx,
   sessionUpdateData.pCipherKey = pCipherKey;
   sessionUpdateData.cipherDirection = cipherDirection;
 
-  do {
-    status = cpaCySymUpdateSession(sessionCtx, &sessionUpdateData);
-  } while (status == CPA_STATUS_RETRY);
+  status = cpaCySymUpdateSession(sessionCtx, &sessionUpdateData);
 
   if (unlikely(status != CPA_STATUS_SUCCESS)) {
     dout(1) << "cpaCySymUpdateSession failed with status = " << status << dendl;
@@ -415,11 +423,13 @@ CpaStatus QccCrypto::initSession(CpaInstanceHandle cyInstHandle,
   sessionSetupData.cipherSetupData.pCipherKey = pCipherKey;
   sessionSetupData.cipherSetupData.cipherDirection = cipherDirection;
 
-  status = cpaCySymDpSessionCtxGetSize(cyInstHandle, &sessionSetupData, &sessionCtxSize);
-  if (likely(CPA_STATUS_SUCCESS == status)) {
-    status = qcc_contig_mem_alloc((void **)(sessionCtx), sessionCtxSize);
-  } else {
-    dout(1) << "cpaCySymDpSessionCtxGetSize failed with status = " << status << dendl;
+  if (nullptr == *sessionCtx) {
+    status = cpaCySymDpSessionCtxGetSize(cyInstHandle, &sessionSetupData, &sessionCtxSize);
+    if (likely(CPA_STATUS_SUCCESS == status)) {
+      status = qcc_contig_mem_alloc((void **)(sessionCtx), sessionCtxSize);
+    } else {
+      dout(1) << "cpaCySymDpSessionCtxGetSize failed with status = " << status << dendl;
+    }
   }
   if (likely(CPA_STATUS_SUCCESS == status)) {
     status = cpaCySymDpInitSession(cyInstHandle,
@@ -434,18 +444,43 @@ CpaStatus QccCrypto::initSession(CpaInstanceHandle cyInstHandle,
   return status;
 }
 
+template <typename CompletionToken>
+auto QatCrypto::async_perform_op(int avail_inst, std::vector<CpaCySymDpOpData*>& pOpDataVec, CompletionToken&& token) {
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  using boost::asio::async_completion;
+  using Signature = void(boost::system::error_code);
+  async_completion<CompletionToken, Signature> init(token);
+  auto ex = boost::asio::get_associated_executor(init.completion_handler);
+  completion_handler = [this, ex, handler = init.completion_handler](boost::system::error_code ec){
+    boost::asio::post(ex, std::bind(handler, ec));
+  };
+
+  status = cpaCySymDpEnqueueOpBatch(pOpDataVec.size(), &pOpDataVec[0], CPA_TRUE);
+
+  if (status != CPA_STATUS_SUCCESS) {
+    auto ec = boost::system::error_code{status, boost::system::system_category()};
+
+    boost::asio::dispatch(context, [this, &ec](){
+      completion_handler(ec);
+    });
+  }
+  return init.result.get();
+}
+
 bool QccCrypto::symPerformOp(int avail_inst,
                               CpaCySymSessionCtx sessionCtx,
                               const Cpa8U *pSrc,
                               Cpa8U *pDst,
                               Cpa32U size,
                               Cpa8U *pIv,
-                              Cpa32U ivLen) {
+                              Cpa32U ivLen,
+                              optional_yield y) {
   CpaStatus status = CPA_STATUS_SUCCESS;
   Cpa32U one_batch_size = chunk_size * MAX_NUM_SYM_REQ_BATCH;
   Cpa32U iv_index = 0;
   for (Cpa32U off = 0; off < size; off += one_batch_size) {
-    CompletionHandle complete;
+    QatCrypto helper(y.get_io_context(), y.get_yield_context(), this);
+    std::vector<CpaCySymDpOpData*> pOpDataVec;
     for (Cpa32U offset = off, i = 0; offset < size && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
       CpaCySymDpOpData *pOpData = qcc_op_mem[avail_inst].sym_op_data[i];
       Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
@@ -458,13 +493,13 @@ bool QccCrypto::symPerformOp(int avail_inst,
         memcpy(pIvBuffer, &pIv[iv_index * ivLen], ivLen);
         iv_index++;
 
-        complete.add_one();
+        helper.count++;
 
         //pOpData assignment
         pOpData->thisPhys = qaeVirtToPhysNUMA(pOpData);
         pOpData->instanceHandle = qcc_inst->cy_inst_handles[avail_inst];
         pOpData->sessionCtx = sessionCtx;
-        pOpData->pCallbackTag = (void *)&complete;
+        pOpData->pCallbackTag = &helper;
         pOpData->cryptoStartSrcOffsetInBytes = 0;
         pOpData->messageLenToCipherInBytes = process_size;
         pOpData->iv = qaeVirtToPhysNUMA(pIvBuffer);
@@ -475,27 +510,20 @@ bool QccCrypto::symPerformOp(int avail_inst,
         pOpData->dstBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
         pOpData->dstBufferLen = process_size;
 
-        status = cpaCySymDpEnqueueOp(pOpData, CPA_FALSE);
-        if (unlikely(CPA_STATUS_SUCCESS != status)) {
-          dout(1) << "cpaCySymDpEnqueueOp failed. (status = " << status << ")" << dendl;
-          // submit all request, clean the queue
-          cpaCySymDpPerformOpNow(qcc_inst->cy_inst_handles[avail_inst]);
-          return false;
-        }
+        pOpDataVec.push_back(pOpData);
+
       }
     }
 
-    if (likely(CPA_STATUS_SUCCESS == status)) {
-      status = cpaCySymDpPerformOpNow(qcc_inst->cy_inst_handles[avail_inst]);
-      if (unlikely(CPA_STATUS_SUCCESS != status)) {
-        dout(1) << "cpaCySymDpPerformOpNow failed. (status = " << status << ")" << dendl;
-        return false;
-      }
-    }
+    boost::system::error_code ec;
+    yield_context yield = y.get_yield_context();
+    ceph_assert(!helper.completion_handler);
+
+    do {
+      helper.async_perform_op(avail_inst, pOpDataVec, yield[ec]);
+    } while (!ec && ec.value() == CPA_STATUS_RETRY);
 
     if (likely(CPA_STATUS_SUCCESS == status)) {
-      complete.wait();
-      // Copy data back to pDst buffer
       for (Cpa32U offset = off, i = 0; offset < size && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
         Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
         Cpa32U process_size = offset + chunk_size <= size ? chunk_size : size - offset;

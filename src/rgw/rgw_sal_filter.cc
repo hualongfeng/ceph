@@ -1307,9 +1307,9 @@ int FilterNotification::publish_commit(const DoutPrefixProvider* dpp, uint64_t s
   return next->publish_commit(dpp, size, mtime, etag, version);
 }
 
-int FilterWriter::process(bufferlist&& data, uint64_t offset)
+int FilterWriter::process(bufferlist&& data, uint64_t offset, optional_yield y)
 {
-  return next->process(std::move(data), offset);
+  return next->process(std::move(data), offset, y);
 }
 
 int FilterWriter::complete(size_t accounted_size, const std::string& etag,

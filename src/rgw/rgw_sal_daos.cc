@@ -1522,7 +1522,7 @@ int DaosAtomicWriter::prepare(optional_yield y) {
 // TODO: Handle concurrent writes, a unique object id is a possible solution, or
 // use DAOS transactions
 // XXX: Do we need to accumulate writes as motr does?
-int DaosAtomicWriter::process(bufferlist&& data, uint64_t offset) {
+int DaosAtomicWriter::process(bufferlist&& data, uint64_t offset, optional_yield y) {
   ldpp_dout(dpp, 20) << "DEBUG: process" << dendl;
   if (data.length() == 0) {
     return 0;
@@ -2048,7 +2048,7 @@ const std::string& DaosMultipartWriter::get_bucket_name() {
   return static_cast<DaosMultipartUpload*>(upload)->get_bucket_name();
 }
 
-int DaosMultipartWriter::process(bufferlist&& data, uint64_t offset) {
+int DaosMultipartWriter::process(bufferlist&& data, uint64_t offset, optional_yield y) {
   ldpp_dout(dpp, 20) << "DaosMultipartWriter::process(): enter part="
                      << part_num_str << " offset=" << offset << dendl;
   if (data.length() == 0) {

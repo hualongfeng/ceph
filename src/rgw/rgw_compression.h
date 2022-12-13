@@ -53,7 +53,7 @@ public:
     : Pipe(next), cct(cct_), compressor(compressor) {}
   virtual ~RGWPutObj_Compress() override {};
 
-  int process(bufferlist&& data, uint64_t logical_offset) override;
+  int process(bufferlist&& data, uint64_t logical_offset, optional_yield y) override;
 
   bool is_compressed() { return compressed; }
   std::vector<compression_block>& get_compression_blocks() { return blocks; }

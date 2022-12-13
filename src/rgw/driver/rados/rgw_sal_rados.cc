@@ -2948,9 +2948,9 @@ int RadosAtomicWriter::prepare(optional_yield y)
   return processor.prepare(y);
 }
 
-int RadosAtomicWriter::process(bufferlist&& data, uint64_t offset)
+int RadosAtomicWriter::process(bufferlist&& data, uint64_t offset, optional_yield y)
 {
-  return processor.process(std::move(data), offset);
+  return processor.process(std::move(data), offset, y);
 }
 
 int RadosAtomicWriter::complete(size_t accounted_size, const std::string& etag,
@@ -2971,9 +2971,9 @@ int RadosAppendWriter::prepare(optional_yield y)
   return processor.prepare(y);
 }
 
-int RadosAppendWriter::process(bufferlist&& data, uint64_t offset)
+int RadosAppendWriter::process(bufferlist&& data, uint64_t offset, optional_yield y)
 {
-  return processor.process(std::move(data), offset);
+  return processor.process(std::move(data), offset, y);
 }
 
 int RadosAppendWriter::complete(size_t accounted_size, const std::string& etag,
@@ -2994,9 +2994,9 @@ int RadosMultipartWriter::prepare(optional_yield y)
   return processor.prepare(y);
 }
 
-int RadosMultipartWriter::process(bufferlist&& data, uint64_t offset)
+int RadosMultipartWriter::process(bufferlist&& data, uint64_t offset, optional_yield y)
 {
-  return processor.process(std::move(data), offset);
+  return processor.process(std::move(data), offset, y);
 }
 
 int RadosMultipartWriter::complete(size_t accounted_size, const std::string& etag,

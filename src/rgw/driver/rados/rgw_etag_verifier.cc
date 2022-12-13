@@ -79,13 +79,13 @@ int create_etag_verifier(const DoutPrefixProvider *dpp,
   return 0;
 }
 
-int ETagVerifier_Atomic::process(bufferlist&& in, uint64_t logical_offset)
+int ETagVerifier_Atomic::process(bufferlist&& in, uint64_t logical_offset, optional_yield y)
 {
   bufferlist out;
   if (in.length() > 0)
     hash.Update((const unsigned char *)in.c_str(), in.length());
 
-  return Pipe::process(std::move(in), logical_offset);
+  return Pipe::process(std::move(in), logical_offset, y);
 }
 
 void ETagVerifier_Atomic::calculate_etag()
@@ -124,7 +124,7 @@ void ETagVerifier_MPU::process_end_of_MPU_part()
   next_part_index++;
 }
 
-int ETagVerifier_MPU::process(bufferlist&& in, uint64_t logical_offset)
+int ETagVerifier_MPU::process(bufferlist&& in, uint64_t logical_offset, optional_yield y)
 {
   uint64_t bl_end = in.length() + logical_offset;
 
@@ -158,7 +158,7 @@ int ETagVerifier_MPU::process(bufferlist&& in, uint64_t logical_offset)
     process_end_of_MPU_part();
 
 done:
-  return Pipe::process(std::move(in), logical_offset);
+  return Pipe::process(std::move(in), logical_offset, y);
 }
 
 void ETagVerifier_MPU::calculate_etag()

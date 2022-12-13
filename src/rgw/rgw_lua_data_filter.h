@@ -46,7 +46,7 @@ public:
 
   ~RGWPutObjFilter() override = default;
 
-  int process(bufferlist&& data, uint64_t logical_offset) override;
+  int process(bufferlist&& data, uint64_t logical_offset, optional_yield y) override;
 };
 } // namespace rgw::lua
 

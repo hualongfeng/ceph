@@ -10,6 +10,13 @@
 #include <mutex>
 #include <queue>
 #include <memory>
+#include "common/async/yield_context.h"
+#include "common/async/completion.h"
+#include "include/rados/librados_fwd.hpp"
+#include <memory>
+#include "common/ceph_mutex.h"
+#include <vector>
+#include <functional>
 extern "C" {
 #include "cpa.h"
 #include "cpa_cy_sym_dp.h"
@@ -23,12 +30,24 @@ extern "C" {
 }
 
 class QccCrypto {
-  size_t chunk_size;
+    friend class QatCrypto;
+    size_t chunk_size;
+
+    boost::asio::io_context my_context;
+    std::thread qat_context_thread;
+    void my_context_run();
+    using work_guard_type = boost::asio::executor_work_guard<boost::asio::io_context::executor_type>;
+    std::unique_ptr<work_guard_type> work_guard;
+
+    std::queue<std::function<void(int)>> instance_completions;
+
+    template <typename CompletionToken>
+    auto async_get_instance(CompletionToken&& token);
 
   public:
     CpaCySymCipherDirection qcc_op_type;
 
-    QccCrypto() {};
+    QccCrypto(boost::asio::io_context& context)  {};
     ~QccCrypto() {};
 
     bool init(const size_t chunk_size);
@@ -36,10 +55,10 @@ class QccCrypto {
     bool perform_op_batch(unsigned char* out, const unsigned char* in, size_t size,
                           Cpa8U *iv,
                           Cpa8U *key,
-                          CpaCySymCipherDirection op_type);
+                          CpaCySymCipherDirection op_type,
+                          optional_yield y);
 
   private:
-
     // Currently only supporting AES_256_CBC.
     // To-Do: Needs to be expanded
     static const size_t AES_256_IV_LEN = 16;
@@ -90,7 +109,6 @@ class QccCrypto {
      * Handle queue with free instances to handle op
      */
     std::queue<int> open_instances;
-    int QccGetFreeInstance();
     void QccFreeInstance(int entry);
     std::thread qat_poll_thread;
     bool thread_stop{false};
@@ -158,7 +176,8 @@ class QccCrypto {
                       Cpa8U *pDst,
                       Cpa32U size,
                       Cpa8U *pIv,
-                      Cpa32U ivLen);
+                      Cpa32U ivLen,
+                      optional_yield y);
 
     CpaStatus initSession(CpaInstanceHandle cyInstHandle,
                           CpaCySymSessionCtx *sessionCtx,
@@ -168,5 +187,39 @@ class QccCrypto {
     CpaStatus updateSession(CpaCySymSessionCtx sessionCtx,
                             Cpa8U *pCipherKey,
                             CpaCySymCipherDirection cipherDirection);
+
+
+};
+
+class QatCrypto {
+  boost::asio::io_context& context;
+  yield_context yield;
+  QccCrypto *crypto;
+
+ public:
+  std::function<void(boost::system::error_code)> completion_handler;
+  std::atomic<std::size_t> count;
+  std::mutex mutex;
+  bool complete() {
+    std::scoped_lock lock{mutex};
+    count--;
+    return (count == 0);
+  }
+
+  void add_one() {
+    count++;
+  }
+
+  QatCrypto (boost::asio::io_context& context,
+             yield_context yield,
+             QccCrypto *crypto
+             ) : context(context), yield(yield), crypto(crypto){}
+  QatCrypto (const QatCrypto &qat) = delete;
+  QatCrypto (QatCrypto &&qat) = delete;
+  void operator=(const QatCrypto &qat) = delete;
+  void operator=(QatCrypto &&qat) = delete;
+
+  template <typename CompletionToken>
+  auto async_perform_op(int avail_inst, std::vector<CpaCySymDpOpData*>& pOpDataVec, CompletionToken&& token);
 };
 #endif //QCCCRYPTO_H

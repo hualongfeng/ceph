@@ -18,7 +18,8 @@
 
 bool ISALCryptoAccel::cbc_encrypt(unsigned char* out, const unsigned char* in, size_t size,
                              const unsigned char (&iv)[AES_256_IVSIZE],
-                             const unsigned char (&key)[AES_256_KEYSIZE])
+                             const unsigned char (&key)[AES_256_KEYSIZE],
+                             optional_yield y)
 {
   if (unlikely((size % AES_256_IVSIZE) != 0)) {
     return false;
@@ -31,7 +32,8 @@ bool ISALCryptoAccel::cbc_encrypt(unsigned char* out, const unsigned char* in, s
 }
 bool ISALCryptoAccel::cbc_decrypt(unsigned char* out, const unsigned char* in, size_t size,
                              const unsigned char (&iv)[AES_256_IVSIZE],
-                             const unsigned char (&key)[AES_256_KEYSIZE])
+                             const unsigned char (&key)[AES_256_KEYSIZE],
+                             optional_yield y)
 {
   if (unlikely((size % AES_256_IVSIZE) != 0)) {
     return false;
