@@ -222,7 +222,7 @@ class DataProcessor {
    * An empty bufferlist is given to request that any buffered data be flushed, though this doesn't
    * wait for completions
    */
-  virtual int process(bufferlist&& data, uint64_t offset) = 0;
+  virtual int process(bufferlist&& data, uint64_t offset, optional_yield y=null_yield) = 0;
 };
 
 /**
@@ -1407,7 +1407,7 @@ public:
    * data.length() == 0 indicates the last call and may be used to flush
    * the data buffers.
    */
-  virtual int process(bufferlist&& data, uint64_t offset) = 0;
+  virtual int process(bufferlist&& data, uint64_t offset, optional_yield y=null_yield) = 0;
 
   /** complete the operation and make its result visible to clients */
   virtual int complete(size_t accounted_size, const std::string& etag,

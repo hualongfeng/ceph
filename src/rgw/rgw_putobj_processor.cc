@@ -27,7 +27,7 @@ using namespace std;
 
 namespace rgw::putobj {
 
-int HeadObjectProcessor::process(bufferlist&& data, uint64_t logical_offset)
+int HeadObjectProcessor::process(bufferlist&& data, uint64_t logical_offset, optional_yield y)
 {
   const bool flush = (data.length() == 0);
 
@@ -95,7 +95,7 @@ int RadosWriter::set_stripe_obj(const rgw_raw_obj& raw_obj)
   return stripe_obj.open(dpp);
 }
 
-int RadosWriter::process(bufferlist&& bl, uint64_t offset)
+int RadosWriter::process(bufferlist&& bl, uint64_t offset, optional_yield y)
 {
   bufferlist data = std::move(bl);
   const uint64_t cost = data.length();

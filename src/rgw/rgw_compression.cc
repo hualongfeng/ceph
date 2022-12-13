@@ -41,7 +41,7 @@ int rgw_compression_info_from_attrset(const map<string, bufferlist>& attrs,
 
 //------------RGWPutObj_Compress---------------
 
-int RGWPutObj_Compress::process(bufferlist&& in, uint64_t logical_offset)
+int RGWPutObj_Compress::process(bufferlist&& in, uint64_t logical_offset, optional_yield y)
 {
   bufferlist out;
   compressed_ofs = logical_offset;
@@ -84,7 +84,7 @@ int RGWPutObj_Compress::process(bufferlist&& in, uint64_t logical_offset)
     compressed_ofs = bs > 0 ? blocks[bs-1].len + blocks[bs-1].new_ofs : logical_offset;
   }
 
-  return Pipe::process(std::move(out), compressed_ofs);
+  return Pipe::process(std::move(out), compressed_ofs, y);
 }
 
 //----------------RGWGetObj_Decompress---------------------

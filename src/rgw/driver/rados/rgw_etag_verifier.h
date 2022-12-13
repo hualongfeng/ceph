@@ -46,7 +46,7 @@ public:
   ETagVerifier_Atomic(CephContext* cct_, rgw::sal::DataProcessor *next)
     : ETagVerifier(cct_, next) {}
 
-  int process(bufferlist&& data, uint64_t logical_offset) override;
+  int process(bufferlist&& data, uint64_t logical_offset, optional_yield y=null_yield) override;
   void calculate_etag() override;
 
 }; /* ETagVerifier_Atomic */
@@ -70,7 +70,7 @@ public:
     hash.SetFlags(EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
   }
 
-  int process(bufferlist&& data, uint64_t logical_offset) override;
+  int process(bufferlist&& data, uint64_t logical_offset, optional_yield y=null_yield) override;
   void calculate_etag() override;
 
 }; /* ETagVerifier_MPU */

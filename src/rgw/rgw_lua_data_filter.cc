@@ -132,10 +132,10 @@ int RGWGetObjFilter::handle_data(bufferlist& bl,
   return RGWGetObj_Filter::handle_data(bl, bl_ofs, bl_len);
 }
 
-int RGWPutObjFilter::process(bufferlist&& data, uint64_t logical_offset) {
+int RGWPutObjFilter::process(bufferlist&& data, uint64_t logical_offset, optional_yield y) {
   filter.execute(data, logical_offset, "put_obj");
   // return value is ignored since we don't want to fail execution if lua script fails
-  return rgw::putobj::Pipe::process(std::move(data), logical_offset); 
+  return rgw::putobj::Pipe::process(std::move(data), logical_offset, y); 
 }
 
 } // namespace rgw::lua

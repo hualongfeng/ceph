@@ -135,7 +135,7 @@ public:
                          rgw::sal::DataProcessor *next,
                          std::unique_ptr<BlockCrypt> crypt);
 
-  int process(bufferlist&& data, uint64_t logical_offset) override;
+  int process(bufferlist&& data, uint64_t logical_offset, optional_yield y=null_yield) override;
 }; /* RGWPutObj_BlockEncrypt */
 
 

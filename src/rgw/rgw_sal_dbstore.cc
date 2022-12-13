@@ -1265,7 +1265,7 @@ namespace rgw::sal {
     return 0;
   }
 
-  int DBMultipartWriter::process(bufferlist&& data, uint64_t offset)
+  int DBMultipartWriter::process(bufferlist&& data, uint64_t offset, optional_yield y)
   {
     /* XXX: same as AtomicWriter..consolidate code */
     total_data_size += data.length();
@@ -1408,7 +1408,7 @@ namespace rgw::sal {
     return parent_op.prepare(NULL); /* send dpp */
   }
 
-  int DBAtomicWriter::process(bufferlist&& data, uint64_t offset)
+  int DBAtomicWriter::process(bufferlist&& data, uint64_t offset, optional_yield y)
   {
     total_data_size += data.length();
 

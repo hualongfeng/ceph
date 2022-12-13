@@ -825,7 +825,7 @@ RGWPutObj_BlockEncrypt::RGWPutObj_BlockEncrypt(const DoutPrefixProvider *dpp,
 {
 }
 
-int RGWPutObj_BlockEncrypt::process(bufferlist&& data, uint64_t logical_offset)
+int RGWPutObj_BlockEncrypt::process(bufferlist&& data, uint64_t logical_offset, optional_yield y)
 {
   ldpp_dout(this->dpp, 25) << "Encrypt " << data.length() << " bytes" << dendl;
 
@@ -846,7 +846,7 @@ int RGWPutObj_BlockEncrypt::process(bufferlist&& data, uint64_t logical_offset)
     if (!crypt->encrypt(in, 0, proc_size, out, logical_offset)) {
       return -ERR_INTERNAL_ERROR;
     }
-    int r = Pipe::process(std::move(out), logical_offset);
+    int r = Pipe::process(std::move(out), logical_offset, y);
     logical_offset += proc_size;
     if (r < 0)
       return r;
@@ -854,7 +854,7 @@ int RGWPutObj_BlockEncrypt::process(bufferlist&& data, uint64_t logical_offset)
 
   if (flush) {
     /*replicate 0-sized handle_data*/
-    return Pipe::process({}, logical_offset);
+    return Pipe::process({}, logical_offset, y);
   }
   return 0;
 }

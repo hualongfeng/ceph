@@ -862,7 +862,7 @@ public:
   virtual ~FilterWriter() = default;
 
   virtual int prepare(optional_yield y) { return next->prepare(y); }
-  virtual int process(bufferlist&& data, uint64_t offset) override;
+  virtual int process(bufferlist&& data, uint64_t offset, optional_yield y=null_yield) override;
   virtual int complete(size_t accounted_size, const std::string& etag,
                        ceph::real_time *mtime, ceph::real_time set_mtime,
                        std::map<std::string, bufferlist>& attrs,
