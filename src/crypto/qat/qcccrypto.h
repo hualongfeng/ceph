@@ -10,6 +10,7 @@
 #include <mutex>
 #include <queue>
 #include <memory>
+#include "common/async/yield_context.h"
 extern "C" {
 #include "cpa.h"
 #include "cpa_cy_sym_dp.h"
@@ -36,7 +37,8 @@ class QccCrypto {
     bool perform_op_batch(unsigned char* out, const unsigned char* in, size_t size,
                           Cpa8U *iv,
                           Cpa8U *key,
-                          CpaCySymCipherDirection op_type);
+                          CpaCySymCipherDirection op_type,
+                          optional_yield y);
 
   private:
 

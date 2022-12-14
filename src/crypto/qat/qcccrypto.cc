@@ -289,7 +289,8 @@ bool QccCrypto::destroy() {
 bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, size_t size,
     Cpa8U *iv,
     Cpa8U *key,
-    CpaCySymCipherDirection op_type)
+    CpaCySymCipherDirection op_type,
+    optional_yield y)
 {
   if (!init_called) {
     dout(10) << "QAT not intialized yet. Initializing now..." << dendl;

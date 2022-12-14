@@ -442,7 +442,8 @@ public:
                      size_t size,
                      off_t stream_offset,
                      const unsigned char (&key)[AES_256_KEYSIZE],
-                     bool encrypt)
+                     bool encrypt,
+                     optional_yield y)
   {
     static std::atomic<bool> failed_to_get_crypto(false);
     CryptoAccelRef crypto_accel;
@@ -454,7 +455,7 @@ public:
     }
     bool result = true;
     static std::string accelerator = cct->_conf->plugin_crypto_accelerator;
-    if (accelerator == "crypto_qat" && crypto_accel != nullptr) {
+    if (accelerator == "crypto_qat" && crypto_accel != nullptr && y) {
       // now, batch mode is only for QAT plugin
       size_t iv_num = size / CHUNK_SIZE;
       if (size % CHUNK_SIZE) ++iv_num;
@@ -463,9 +464,9 @@ public:
         prepare_iv(iv[i], stream_offset + offset);
       }
         if (encrypt) {
-          result = crypto_accel->cbc_encrypt_batch(out, in, size, iv, key);
+          result = crypto_accel->cbc_encrypt_batch(out, in, size, iv, key, y);
         } else {
-          result = crypto_accel->cbc_decrypt_batch(out, in, size, iv, key);
+          result = crypto_accel->cbc_decrypt_batch(out, in, size, iv, key, y);
         }
       delete[] iv;
     } else {
@@ -476,10 +477,10 @@ public:
         if (crypto_accel != nullptr) {
           if (encrypt) {
             result = crypto_accel->cbc_encrypt(out + offset, in + offset,
-                                              process_size, iv, key);
+                                              process_size, iv, key, y);
           } else {
             result = crypto_accel->cbc_decrypt(out + offset, in + offset,
-                                              process_size, iv, key);
+                                              process_size, iv, key, y);
           }
         } else {
           result = cbc_transform(
@@ -496,7 +497,8 @@ public:
                off_t in_ofs,
                size_t size,
                bufferlist& output,
-               off_t stream_offset)
+               off_t stream_offset,
+               optional_yield y)
   {
     bool result = false;
     size_t aligned_size = size / AES_256_IVSIZE * AES_256_IVSIZE;
@@ -510,7 +512,7 @@ public:
     result = cbc_transform(buf_raw,
                            input_raw + in_ofs,
                            aligned_size,
-                           stream_offset, key, true);
+                           stream_offset, key, true, y);
     if (result && (unaligned_rest_size > 0)) {
       /* remainder to encrypt */
       if (aligned_size % CHUNK_SIZE > 0) {
@@ -551,7 +553,8 @@ public:
                off_t in_ofs,
                size_t size,
                bufferlist& output,
-               off_t stream_offset)
+               off_t stream_offset,
+               optional_yield y)
   {
     bool result = false;
     size_t aligned_size = size / AES_256_IVSIZE * AES_256_IVSIZE;
@@ -565,7 +568,7 @@ public:
     result = cbc_transform(buf_raw,
                            input_raw + in_ofs,
                            aligned_size,
-                           stream_offset, key, false);
+                           stream_offset, key, false, y);
     if (result && unaligned_rest_size > 0) {
       /* remainder to decrypt */
       if (aligned_size % CHUNK_SIZE > 0) {
@@ -743,7 +746,7 @@ int RGWGetObj_BlockDecrypt::fixup_range(off_t& bl_ofs, off_t& bl_end) {
 int RGWGetObj_BlockDecrypt::process(bufferlist& in, size_t part_ofs, size_t size)
 {
   bufferlist data;
-  if (!crypt->decrypt(in, 0, size, data, part_ofs)) {
+  if (!crypt->decrypt(in, 0, size, data, part_ofs, null_yield)) {
     return -ERR_INTERNAL_ERROR;
   }
   off_t send_size = size - enc_begin_skip;
@@ -843,7 +846,7 @@ int RGWPutObj_BlockEncrypt::process(bufferlist&& data, uint64_t logical_offset, 
   if (proc_size > 0) {
     bufferlist in, out;
     cache.splice(0, proc_size, &in);
-    if (!crypt->encrypt(in, 0, proc_size, out, logical_offset)) {
+    if (!crypt->encrypt(in, 0, proc_size, out, logical_offset, y)) {
       return -ERR_INTERNAL_ERROR;
     }
     int r = Pipe::process(std::move(out), logical_offset, y);

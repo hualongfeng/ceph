@@ -77,7 +77,8 @@ bool evp_transform(unsigned char* out, const unsigned char* in, size_t size,
                         
 bool OpenSSLCryptoAccel::cbc_encrypt(unsigned char* out, const unsigned char* in, size_t size,
                              const unsigned char (&iv)[AES_256_IVSIZE],
-                             const unsigned char (&key)[AES_256_KEYSIZE])
+                             const unsigned char (&key)[AES_256_KEYSIZE],
+                             optional_yield y)
 {
   if (unlikely((size % AES_256_IVSIZE) != 0)) {
     return false;
@@ -91,7 +92,8 @@ bool OpenSSLCryptoAccel::cbc_encrypt(unsigned char* out, const unsigned char* in
                              
 bool OpenSSLCryptoAccel::cbc_decrypt(unsigned char* out, const unsigned char* in, size_t size,
                              const unsigned char (&iv)[AES_256_IVSIZE],
-                             const unsigned char (&key)[AES_256_KEYSIZE])
+                             const unsigned char (&key)[AES_256_KEYSIZE],
+                             optional_yield y)
 {
   if (unlikely((size % AES_256_IVSIZE) != 0)) {
     return false;

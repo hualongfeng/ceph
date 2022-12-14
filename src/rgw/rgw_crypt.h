@@ -14,6 +14,7 @@
 #include <rgw/rgw_rest.h>
 #include <rgw/rgw_rest_s3.h>
 #include "rgw_putobj.h"
+#include "common/async/yield_context.h"
 
 /**
  * \brief Interface for block encryption methods
@@ -56,7 +57,8 @@ public:
                        off_t in_ofs,
                        size_t size,
                        bufferlist& output,
-                       off_t stream_offset) = 0;
+                       off_t stream_offset,
+                       optional_yield y) = 0;
 
   /**
    * Decrypts data.
@@ -76,7 +78,8 @@ public:
                        off_t in_ofs,
                        size_t size,
                        bufferlist& output,
-                       off_t stream_offset) = 0;
+                       off_t stream_offset,
+                       optional_yield y) = 0;
 };
 
 static const size_t AES_256_KEYSIZE = 256 / 8;
