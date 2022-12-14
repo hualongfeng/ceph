@@ -351,14 +351,14 @@ int RGWDataAccess::Object::put(bufferlist& data,
     data.splice(0, read_len, &bl);
     etag_calc.update(bl);
 
-    ret = filter->process(std::move(bl), ofs);
+    ret = filter->process(std::move(bl), ofs, y);
     if (ret < 0)
       return ret;
 
     ofs += read_len;
   } while (data.length() > 0);
 
-  ret = filter->process({}, ofs);
+  ret = filter->process({}, ofs, y);
   if (ret < 0) {
     return ret;
   }

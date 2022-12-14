@@ -3493,11 +3493,11 @@ public:
     const uint64_t lofs = data_len;
     data_len += size;
 
-    return filter->process(std::move(bl), lofs);
+    return filter->process(std::move(bl), lofs, null_yield);
   }
 
   int flush() {
-    return filter->process({}, data_len);
+    return filter->process({}, data_len, null_yield);
   }
 
   bufferlist& get_extra_data() { return extra_data_bl; }
@@ -4582,7 +4582,7 @@ int RGWRados::copy_obj_data(RGWObjectCtx& obj_ctx,
     }
 
     uint64_t read_len = ret;
-    ret = processor.process(std::move(bl), ofs);
+    ret = processor.process(std::move(bl), ofs, y);
     if (ret < 0) {
       return ret;
     }
@@ -4591,7 +4591,7 @@ int RGWRados::copy_obj_data(RGWObjectCtx& obj_ctx,
   } while (ofs <= end);
 
   // flush
-  ret = processor.process({}, ofs);
+  ret = processor.process({}, ofs, y);
   if (ret < 0) {
     return ret;
   }

@@ -795,7 +795,7 @@ public:
   virtual int prepare(optional_yield y) override;
 
   // Process a bufferlist
-  virtual int process(bufferlist&& data, uint64_t offset, optional_yield y=null_yield) override;
+  virtual int process(bufferlist&& data, uint64_t offset, optional_yield y) override;
 
   // complete the operation and make its result visible to clients
   virtual int complete(size_t accounted_size, const std::string& etag,
@@ -841,7 +841,7 @@ public:
   virtual int prepare(optional_yield y) override;
 
   // Process a bufferlist
-  virtual int process(bufferlist&& data, uint64_t offset, optional_yield y=null_yield) override;
+  virtual int process(bufferlist&& data, uint64_t offset, optional_yield y) override;
 
   // complete the operation and make its result visible to clients
   virtual int complete(size_t accounted_size, const std::string& etag,
@@ -885,7 +885,7 @@ public:
   virtual int prepare(optional_yield y) override;
 
   // Process a bufferlist
-  virtual int process(bufferlist&& data, uint64_t offset, optional_yield y=null_yield) override;
+  virtual int process(bufferlist&& data, uint64_t offset, optional_yield y) override;
 
   // complete the operation and make its result visible to clients
   virtual int complete(size_t accounted_size, const std::string& etag,

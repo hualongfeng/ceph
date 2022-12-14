@@ -60,7 +60,7 @@ int HeadObjectProcessor::process(bufferlist&& data, uint64_t logical_offset, opt
   // send everything else through the processor
   auto write_offset = data_offset;
   data_offset += data.length();
-  return processor->process(std::move(data), write_offset);
+  return processor->process(std::move(data), write_offset, y);
 }
 
 

@@ -58,7 +58,7 @@ class HeadObjectProcessor : public rgw::sal::ObjectProcessor {
 
   // cache first chunk for process_first_chunk(), then forward everything else
   // to the returned processor
-  int process(bufferlist&& data, uint64_t logical_offset, optional_yield y=null_yield) final override;
+  int process(bufferlist&& data, uint64_t logical_offset, optional_yield y) final override;
 };
 
 using RawObjSet = std::set<rgw_raw_obj>;
@@ -95,7 +95,7 @@ class RadosWriter : public rgw::sal::DataProcessor {
   int set_stripe_obj(const rgw_raw_obj& obj);
 
   // write the data at the given offset of the current stripe object
-  int process(bufferlist&& data, uint64_t stripe_offset, optional_yield y=null_yield) override;
+  int process(bufferlist&& data, uint64_t stripe_offset, optional_yield y) override;
 
   // write the data as an exclusive create and wait for it to complete
   int write_exclusive(const bufferlist& data);
