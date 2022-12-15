@@ -11,6 +11,10 @@
 #include <queue>
 #include <memory>
 #include "common/async/yield_context.h"
+#include "common/async/completion.h"
+#include "include/rados/librados_fwd.hpp"
+#include <memory>
+#include "common/ceph_mutex.h"
 extern "C" {
 #include "cpa.h"
 #include "cpa_cy_sym_dp.h"
@@ -24,7 +28,48 @@ extern "C" {
 }
 
 class QccCrypto {
+  static const size_t AES_256_IV_LEN = 16;
+  static const size_t AES_256_KEY_SIZE = 32;
+  static const size_t MAX_NUM_SYM_REQ_BATCH = 32;
+
   size_t chunk_size;
+  Cpa16U numInstances{0};
+  std::vector<CpaInstanceHandle> cyInstances;
+  std::atomic<size_t> index{0};
+
+  std::thread qat_poll_thread;
+  bool thread_stop{false};
+
+public:
+  struct OPMEM {
+    CpaCySymDpOpData *sym_op_data{nullptr};
+    Cpa8U *src_buff{nullptr};
+    Cpa8U *iv_buff{nullptr};
+   public:
+    OPMEM() {};
+    OPMEM(size_t chunk_size);
+    OPMEM(const OPMEM &opmem) = delete;
+    OPMEM(OPMEM &&opmem)
+      : sym_op_data(opmem.sym_op_data),
+        src_buff(opmem.src_buff),
+        iv_buff(opmem.iv_buff) {
+      opmem.sym_op_data = nullptr;
+      opmem.src_buff = nullptr;
+      opmem.iv_buff = nullptr;
+    }
+    void operator=(const OPMEM &opmem) = delete;
+    void operator=(OPMEM &&opmem){
+      sym_op_data = opmem.sym_op_data;
+      src_buff = opmem.src_buff;
+      iv_buff = opmem.iv_buff;
+      opmem.sym_op_data = nullptr;
+      opmem.src_buff = nullptr;
+      opmem.iv_buff = nullptr;
+    }
+    ~OPMEM();
+    bool alloc_ok() {return (sym_op_data != nullptr) && (src_buff != nullptr) && (iv_buff != nullptr);}
+  };
+  static std::vector<OPMEM> op_mem;
 
   public:
     CpaCySymCipherDirection qcc_op_type;
@@ -41,62 +86,6 @@ class QccCrypto {
                           optional_yield y);
 
   private:
-
-    // Currently only supporting AES_256_CBC.
-    // To-Do: Needs to be expanded
-    static const size_t AES_256_IV_LEN = 16;
-    static const size_t AES_256_KEY_SIZE = 32;
-    static const size_t MAX_NUM_SYM_REQ_BATCH = 32;
-
-    /*
-     * Struct to hold an instance of QAT to handle the crypto operations. These
-     * will be identified at the start and held until the destructor is called
-     * To-Do:
-     * The struct was creating assuming that we will use all the instances.
-     * Expand current implementation to allow multiple instances to operate
-     * independently.
-     */
-    struct QCCINST {
-      CpaInstanceHandle *cy_inst_handles;
-      CpaBoolean *is_polled;
-      Cpa16U num_instances;
-    } *qcc_inst;
-
-    /*
-     * QAT Crypto Session
-     * Crypto Session Context and setupdata holds
-     * priority, type of crypto operation (cipher/chained),
-     * cipher algorithm (AES, DES, etc),
-     * single crypto or multi-buffer crypto.
-     */
-    struct QCCSESS {
-      Cpa32U sess_ctx_sz;
-      CpaCySymSessionCtx sess_ctx;
-    } *qcc_sess;
-
-    /*
-     * Cipher Memory Allocations
-     * Holds bufferlist, flatbuffer, cipher opration data and buffermeta needed
-     * by QAT to perform the operation. Also buffers for IV, SRC, DEST.
-     */
-    struct QCCOPMEM {
-      // Op common  items
-      bool is_mem_alloc;
-      bool op_complete;
-      CpaCySymDpOpData *sym_op_data[MAX_NUM_SYM_REQ_BATCH];
-      Cpa8U *src_buff[MAX_NUM_SYM_REQ_BATCH];
-      Cpa8U *iv_buff[MAX_NUM_SYM_REQ_BATCH];
-    } *qcc_op_mem;
-
-    /*
-     * Handle queue with free instances to handle op
-     */
-    std::queue<int> open_instances;
-    int QccGetFreeInstance();
-    void QccFreeInstance(int entry);
-    std::thread qat_poll_thread;
-    bool thread_stop{false};
-
     /*
      * Contiguous Memory Allocator and de-allocator. We are using the usdm
      * driver that comes along with QAT to get us direct memory access using
@@ -154,13 +143,14 @@ class QccCrypto {
      */
     void poll_instances(void);
 
-    bool symPerformOp(int avail_inst,
+    bool symPerformOp(CpaInstanceHandle instance,
                       CpaCySymSessionCtx sessionCtx,
                       const Cpa8U *pSrc,
                       Cpa8U *pDst,
                       Cpa32U size,
                       Cpa8U *pIv,
-                      Cpa32U ivLen);
+                      Cpa32U ivLen,
+                      optional_yield y);
 
     CpaStatus initSession(CpaInstanceHandle cyInstHandle,
                           CpaCySymSessionCtx *sessionCtx,
@@ -170,5 +160,11 @@ class QccCrypto {
     CpaStatus updateSession(CpaCySymSessionCtx sessionCtx,
                             Cpa8U *pCipherKey,
                             CpaCySymCipherDirection cipherDirection);
+
+      static void symDpCallback(CpaCySymDpOpData *pOpData,
+                            CpaStatus status,
+                            CpaBoolean verifyResult);
 };
+
+
 #endif //QCCCRYPTO_H

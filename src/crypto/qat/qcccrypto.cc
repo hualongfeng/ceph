@@ -8,6 +8,7 @@
 #include "common/dout.h"
 #include "common/errno.h"
 #include <atomic>
+#include <chrono>
 
 // -----------------------------------------------------------------------------
 #define dout_context g_ceph_context
@@ -20,67 +21,43 @@ static std::ostream& _prefix(std::ostream* _dout)
   return *_dout << "QccCrypto: ";
 }
 // -----------------------------------------------------------------------------
+class QatCrypto {
+  boost::asio::io_context& context;
+  yield_context yield;
+  struct Handler;
+  using Completion = ceph::async::Completion<void(boost::system::error_code)>;
 
-class CompletionHandle
-{
+  template <typename CompletionToken>
+  auto async_perform_op(CompletionToken&& token);
+
+  CpaInstanceHandle cyInstHandle{nullptr};
+  CpaCySymSessionCtx sessionCtx{nullptr};
+  std::vector<CpaCySymDpOpData*> pOpDataVec;
+  size_t chunk_size;
+
  public:
-  CompletionHandle(size_t count):count(count) {};
-  CompletionHandle():count(0) {};
-  void wait() {
-    std::unique_lock lock{mutex};
-    cv.wait(lock, [this]{return count == 0;});
-  }
-  void complete() {
-    std::scoped_lock lock{mutex};
-    count--;
-    if (count == 0) {
-      cv.notify_one();
-    }
-  }
-
-  void add_one() {
-    count++;
-  }
-
- private:
-  std::condition_variable cv;
-  std::mutex mutex;
-  std::atomic<std::size_t> count;
+  std::unique_ptr<Completion> completion;
+  QatCrypto (boost::asio::io_context& context,
+             yield_context yield,
+             CpaInstanceHandle cyInstHandle,
+             CpaCySymSessionCtx sessionCtx,
+             size_t chunk_size
+             ) : context(context), yield(yield),
+                 cyInstHandle(cyInstHandle), sessionCtx(sessionCtx),
+                 chunk_size(chunk_size) {}
+  QatCrypto (const QatCrypto &qat) = delete;
+  // ~QatCrypto ();
+  bool performOp(const Cpa8U *pSrc,
+                 Cpa8U *pDst,
+                 Cpa32U size,
+                 Cpa8U *pIv,
+                 Cpa32U ivLen);
 };
-
-/*
- * Callback function
- */
-static void symDpCallback(CpaCySymDpOpData *pOpData,
-                        CpaStatus status,
-                        CpaBoolean verifyResult)
-{
-  if (nullptr != pOpData->pCallbackTag)
-  {
-    auto complete = static_cast<CompletionHandle*>(pOpData->pCallbackTag);
-    complete->complete();
-  }
-}
 
 static std::mutex qcc_alloc_mutex;
 static std::mutex qcc_eng_mutex;
 static std::condition_variable alloc_cv;
 static std::atomic<bool> init_called = { false };
-
-void QccCrypto::QccFreeInstance(int entry) {
-  std::lock_guard<std::mutex> freeinst(qcc_alloc_mutex);
-  open_instances.push(entry);
-  alloc_cv.notify_one();
-}
-
-int QccCrypto::QccGetFreeInstance() {
-  int ret = -1;
-  std::unique_lock getinst(qcc_alloc_mutex);
-  alloc_cv.wait(getinst, [this](){return !open_instances.empty();});
-  ret = open_instances.front();
-  open_instances.pop();
-  return ret;
-}
 
 void QccCrypto::cleanup() {
   icp_sal_userStop();
@@ -91,13 +68,13 @@ void QccCrypto::cleanup() {
 }
 
 void QccCrypto::poll_instances(void) {
+  CpaStatus stat = CPA_STATUS_SUCCESS;
   while (!thread_stop) {
-    for (int iter = 0; iter < qcc_inst->num_instances; iter++) {
-      if (qcc_inst->is_polled[iter] == CPA_TRUE) {
-        icp_sal_CyPollDpInstance(qcc_inst->cy_inst_handles[iter], 0);
-      }
+    for (auto instance: cyInstances) {
+        icp_sal_CyPollDpInstance(instance, 0);
     }
     std::this_thread::yield();
+    // std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   }
 }
 
@@ -123,103 +100,59 @@ bool QccCrypto::init(const size_t chunk_size) {
   // create contiguous memory needed by QAT.
   stat = qaeMemInit();
   if (stat != CPA_STATUS_SUCCESS) {
-    derr << "Unable to load memory driver" << dendl;
+    dout(1) << "Failed to initialize memory driver" << dendl;
     this->cleanup();
     return false;
   }
 
-  stat = icp_sal_userStart("CEPH");
+  stat = icp_sal_userStartMultiProcess("CEPH", CPA_FALSE);
   if (stat != CPA_STATUS_SUCCESS) {
-    derr << "Unable to start qat device" << dendl;
+    dout(1) << "Failed to start user process CEPH" << dendl;
     this->cleanup();
     return false;
   }
 
-  qcc_os_mem_alloc((void **)&qcc_inst, sizeof(QCCINST));
-  if (qcc_inst == NULL) {
-    derr << "Unable to alloc mem for instance struct" << dendl;
+  stat = cpaCyGetNumInstances(&numInstances);
+  if ((stat != CPA_STATUS_SUCCESS) || (numInstances <= 0)) {
+    dout(1) << "No instances found for 'CEPH'" << dendl;
     this->cleanup();
     return false;
   }
 
-  // Initialize contents of qcc_inst
-  qcc_inst->num_instances = 0;
-  qcc_inst->cy_inst_handles = NULL;
+  cyInstances.resize(numInstances);
 
-  stat = cpaCyGetNumInstances(&(qcc_inst->num_instances));
-  if ((stat != CPA_STATUS_SUCCESS) || (qcc_inst->num_instances <= 0)) {
-    derr << "Unable to find available instances" << dendl;
-    this->cleanup();
-    return false;
-  }
-
-  qcc_os_mem_alloc((void **)&qcc_inst->cy_inst_handles,
-      ((int)qcc_inst->num_instances * sizeof(CpaInstanceHandle)));
-  if (qcc_inst->cy_inst_handles == NULL) {
-    derr << "Unable to allocate instances array memory" << dendl;
-    this->cleanup();
-    return false;
-  }
-
-  stat = cpaCyGetInstances(qcc_inst->num_instances, qcc_inst->cy_inst_handles);
+  stat = cpaCyGetInstances(numInstances, &cyInstances[0]);
   if (stat != CPA_STATUS_SUCCESS) {
-    derr << "Unable to get instances" << dendl;
+    dout(1) << "Unable to get instances" << dendl;
     this->cleanup();
     return false;
   }
-  dout(1) << "Get instances num: " << qcc_inst->num_instances << dendl;
+  dout(1) << "Get instances num: " << numInstances << dendl;
 
-  int iter = 0;
-  //Start Instances
-  for (iter = 0; iter < qcc_inst->num_instances; iter++) {
-    stat = cpaCyStartInstance(qcc_inst->cy_inst_handles[iter]);
+  for (auto &instance : cyInstances) {
+    stat = cpaCyStartInstance(instance);
     if (stat != CPA_STATUS_SUCCESS) {
-      derr << "Unable to start instance" << dendl;
+      dout(1) << "Unable to start instance" << dendl;
       this->cleanup();
       return false;
     }
-  }
-
-  qcc_os_mem_alloc((void **)&qcc_inst->is_polled,
-      ((int)qcc_inst->num_instances * sizeof(CpaBoolean)));
-  CpaInstanceInfo2 info;
-  for (iter = 0; iter < qcc_inst->num_instances; iter++) {
-    qcc_inst->is_polled[iter] = cpaCyInstanceGetInfo2(qcc_inst->cy_inst_handles[iter],
-        &info) == CPA_STATUS_SUCCESS ? info.isPolled : CPA_FALSE;
-  }
-
-  // Allocate memory structures for all instances
-  qcc_os_mem_alloc((void **)&qcc_sess,
-      ((int)qcc_inst->num_instances * sizeof(QCCSESS)));
-  if (qcc_sess == NULL) {
-    derr << "Unable to allocate memory for session struct" << dendl;
-    this->cleanup();
-    return false;
-  }
-
-  qcc_os_mem_alloc((void **)&qcc_op_mem,
-      ((int)qcc_inst->num_instances * sizeof(QCCOPMEM)));
-  if (qcc_sess == NULL) {
-    derr << "Unable to allocate memory for opmem struct" << dendl;
-    this->cleanup();
-    return false;
-  }
-
-  //At this point we are only doing an user-space version.
-  for (iter = 0; iter < qcc_inst->num_instances; iter++) {
-    stat = cpaCySetAddressTranslation(qcc_inst->cy_inst_handles[iter],
-                                       qaeVirtToPhysNUMA);
-    if (stat == CPA_STATUS_SUCCESS) {
-      open_instances.push(iter);
-      qcc_op_mem[iter].is_mem_alloc = false;
-
-      stat = cpaCySymDpRegCbFunc(qcc_inst->cy_inst_handles[iter], symDpCallback);
+    stat = cpaCySetAddressTranslation(instance, qaeVirtToPhysNUMA);
+    if (stat != CPA_STATUS_SUCCESS) {
+      dout(1) << "Unable to find address translations of instance " << dendl;
+      this->cleanup();
+      return false;
+    }
+    CpaInstanceInfo2 info2;
+    stat = cpaCyInstanceGetInfo2(instance, &info2);
+    if ((stat == CPA_STATUS_SUCCESS) && (info2.isPolled == CPA_TRUE)) {
+      stat = cpaCySymDpRegCbFunc(instance, symDpCallback);
       if (stat != CPA_STATUS_SUCCESS) {
-        dout(1) << "Unable to register callback function for instance " << iter << " with status = " << stat << dendl;
+        this->cleanup();
+        dout(1) << "Unable to register callback function for instance " << " with status = " << stat << dendl;
         return false;
       }
     } else {
-      dout(1) << "Unable to find address translations of instance " << iter << dendl;
+      dout(1) << "One instance cannot poll, check the config" << dendl;
       this->cleanup();
       return false;
     }
@@ -231,16 +164,39 @@ bool QccCrypto::init(const size_t chunk_size) {
   return true;
 }
 
+QccCrypto::OPMEM::OPMEM(size_t chunk_size) {
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  status = qcc_contig_mem_alloc((void **)&iv_buff, AES_256_IV_LEN, 8);
+  if (status != CPA_STATUS_SUCCESS) {
+    dout(1) << "Unable to allocate iv_buff memory" << dendl;
+    throw "Unable to allocate iv_buff memory";
+  }
+
+  // Allocate src memory
+  status = qcc_contig_mem_alloc((void **)&src_buff, chunk_size, 8);
+  if (status != CPA_STATUS_SUCCESS) {
+    dout(1) << "Unable to allocate src_buff memory" << dendl;
+    throw "Unable to allocate src_buff memory";
+  }
+
+  //Setup OpData
+  status = qcc_contig_mem_alloc((void **)&sym_op_data, sizeof(CpaCySymDpOpData), 8);
+  if (status != CPA_STATUS_SUCCESS) {
+    dout(1) << "Unable to allocate opdata memory" << dendl;
+    throw "Unable to allocate opdata memory";
+  }
+}
+
+QccCrypto::OPMEM::~OPMEM() {
+  if (src_buff != nullptr)    qcc_contig_mem_free((void **)src_buff);
+  if (iv_buff != nullptr)     qcc_contig_mem_free((void **)iv_buff);
+  if (sym_op_data != nullptr) qcc_contig_mem_free((void **)sym_op_data);
+}
+
 bool QccCrypto::destroy() {
   if((!is_init) || (!init_called)) {
     dout(15) << "QAT not initialized here. Nothing to do" << dendl;
     return false;
-  }
-
-  {
-    std::unique_lock getinst(qcc_alloc_mutex);
-    // waiting for all instance being free
-    alloc_cv.wait(getinst, [this](){return (open_instances.size() == qcc_inst->num_instances);});
   }
 
   thread_stop = true;
@@ -249,34 +205,11 @@ bool QccCrypto::destroy() {
   }
 
   dout(10) << "Destroying QAT crypto & related memory" << dendl;
-  int iter = 0;
-
-  // Free up op related memory
-  for (iter =0; iter < qcc_inst->num_instances; iter++) {
-    for (size_t i = 0; i < MAX_NUM_SYM_REQ_BATCH; i++) {
-      qcc_contig_mem_free((void **)&(qcc_op_mem[iter].src_buff[i]));
-      qcc_contig_mem_free((void **)&(qcc_op_mem[iter].iv_buff[i]));
-      qcc_contig_mem_free((void **)&(qcc_op_mem[iter].sym_op_data[i]));
-    }
-  }
-
-  // Free up Session memory
-  for (iter = 0; iter < qcc_inst->num_instances; iter++) {
-    cpaCySymDpRemoveSession(qcc_inst->cy_inst_handles[iter], qcc_sess[iter].sess_ctx);
-    qcc_contig_mem_free((void **)&(qcc_sess[iter].sess_ctx));
-  }
 
   // Stop QAT Instances
-  for (iter = 0; iter < qcc_inst->num_instances; iter++) {
-    cpaCyStopInstance(qcc_inst->cy_inst_handles[iter]);
+  for (auto &instance : cyInstances) {
+    cpaCyStopInstance(instance);
   }
-
-  // Free up the base structures we use
-  qcc_os_mem_free((void **)&qcc_op_mem);
-  qcc_os_mem_free((void **)&qcc_sess);
-  qcc_os_mem_free((void **)&(qcc_inst->cy_inst_handles));
-  qcc_os_mem_free((void **)&(qcc_inst->is_polled));
-  qcc_os_mem_free((void **)&qcc_inst);
 
   //Un-init memory driver and QAT HW
   icp_sal_userStop();
@@ -306,73 +239,27 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
     return is_init;
   }
   CpaStatus status = CPA_STATUS_SUCCESS;
-  int avail_inst = -1;
-  avail_inst = QccGetFreeInstance();
 
-  dout(10) << "Using dp_batch inst " << avail_inst << dendl;
+  CpaInstanceHandle instance = cyInstances[index++ % numInstances];
 
-
-  auto sg = make_scope_guard([=] {
-      //free up the instance irrespective of the op status
-      dout(15) << "Completed task under " << avail_inst << dendl;
-      qcc_op_mem[avail_inst].op_complete = false;
-      QccCrypto::QccFreeInstance(avail_inst);
-      });
-
-  /*
-   * Allocate buffers for this version of the instance if not already done.
-   * Hold onto to most of them until destructor is called.
-  */
-  if (qcc_op_mem[avail_inst].is_mem_alloc == false) {
-    for (size_t i = 0; i < MAX_NUM_SYM_REQ_BATCH; i++) {
-      // Allocate IV memory
-      status = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].iv_buff[i]), AES_256_IV_LEN, 8);
-      if (status != CPA_STATUS_SUCCESS) {
-        derr << "Unable to allocate iv_buff memory" << dendl;
-        return false;
-      }
-
-      // Allocate src memory
-      status = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].src_buff[i]), chunk_size, 8);
-      if (status != CPA_STATUS_SUCCESS) {
-        derr << "Unable to allocate src_buff memory" << dendl;
-        return false;
-      }
-
-      //Setup OpData
-      status = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].sym_op_data[i]),
-          sizeof(CpaCySymDpOpData), 8);
-      if (status != CPA_STATUS_SUCCESS) {
-        derr << "Unable to allocate opdata memory" << dendl;
-        return false;
-      }
-    }
-
-    // Set memalloc flag so that we don't go through this exercise again.
-    qcc_op_mem[avail_inst].is_mem_alloc = true;
-
-    status = initSession(qcc_inst->cy_inst_handles[avail_inst],
-                             &(qcc_sess[avail_inst].sess_ctx),
-                             (Cpa8U *)key,
-                             op_type);
-  } else {
-    status = updateSession(qcc_sess[avail_inst].sess_ctx,
-                               (Cpa8U *)key,
-                               op_type);
-  }
+  CpaCySymSessionCtx sessionCtx{nullptr};
+  status = initSession(instance, &sessionCtx,
+                       (Cpa8U *)key,
+                       op_type);
 
   if (unlikely(status != CPA_STATUS_SUCCESS)) {
     derr << "Unable to init session with status =" << status << dendl;
     return false;
   }
 
-  return symPerformOp(avail_inst,
-                      qcc_sess[avail_inst].sess_ctx,
+  return symPerformOp(instance,
+                      sessionCtx,
                       in,
                       out,
                       size,
                       reinterpret_cast<Cpa8U*>(iv),
-                      AES_256_IV_LEN);
+                      AES_256_IV_LEN,
+                      y);
 }
 
 /*
@@ -435,80 +322,116 @@ CpaStatus QccCrypto::initSession(CpaInstanceHandle cyInstHandle,
   return status;
 }
 
-bool QccCrypto::symPerformOp(int avail_inst,
+bool QccCrypto::symPerformOp(CpaInstanceHandle instance,
                               CpaCySymSessionCtx sessionCtx,
                               const Cpa8U *pSrc,
                               Cpa8U *pDst,
                               Cpa32U size,
                               Cpa8U *pIv,
-                              Cpa32U ivLen) {
-  CpaStatus status = CPA_STATUS_SUCCESS;
-  Cpa32U one_batch_size = chunk_size * MAX_NUM_SYM_REQ_BATCH;
-  Cpa32U iv_index = 0;
-  for (Cpa32U off = 0; off < size; off += one_batch_size) {
-    CompletionHandle complete;
-    for (Cpa32U offset = off, i = 0; offset < size && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
-      CpaCySymDpOpData *pOpData = qcc_op_mem[avail_inst].sym_op_data[i];
-      Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
-      Cpa8U *pIvBuffer = qcc_op_mem[avail_inst].iv_buff[i];
-      Cpa32U process_size = offset + chunk_size <= size ? chunk_size : size - offset;
-      if (CPA_STATUS_SUCCESS == status) {
-        // copy source into buffer
-        memcpy(pSrcBuffer, pSrc + offset, process_size);
-        // copy IV into buffer
-        memcpy(pIvBuffer, &pIv[iv_index * ivLen], ivLen);
-        iv_index++;
-
-        complete.add_one();
-
-        //pOpData assignment
-        pOpData->thisPhys = qaeVirtToPhysNUMA(pOpData);
-        pOpData->instanceHandle = qcc_inst->cy_inst_handles[avail_inst];
-        pOpData->sessionCtx = sessionCtx;
-        pOpData->pCallbackTag = (void *)&complete;
-        pOpData->cryptoStartSrcOffsetInBytes = 0;
-        pOpData->messageLenToCipherInBytes = process_size;
-        pOpData->iv = qaeVirtToPhysNUMA(pIvBuffer);
-        pOpData->pIv = pIvBuffer;
-        pOpData->ivLenInBytes = ivLen;
-        pOpData->srcBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
-        pOpData->srcBufferLen = process_size;
-        pOpData->dstBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
-        pOpData->dstBufferLen = process_size;
-
-        status = cpaCySymDpEnqueueOp(pOpData, CPA_FALSE);
-        if (unlikely(CPA_STATUS_SUCCESS != status)) {
-          dout(1) << "cpaCySymDpEnqueueOp failed. (status = " << status << ")" << dendl;
-          // submit all request, clean the queue
-          cpaCySymDpPerformOpNow(qcc_inst->cy_inst_handles[avail_inst]);
-          return false;
-        }
-      }
-    }
-
-    if (likely(CPA_STATUS_SUCCESS == status)) {
-      status = cpaCySymDpPerformOpNow(qcc_inst->cy_inst_handles[avail_inst]);
-      if (unlikely(CPA_STATUS_SUCCESS != status)) {
-        dout(1) << "cpaCySymDpPerformOpNow failed. (status = " << status << ")" << dendl;
-        return false;
-      }
-    }
-
-    if (likely(CPA_STATUS_SUCCESS == status)) {
-      complete.wait();
-      // Copy data back to pDst buffer
-      for (Cpa32U offset = off, i = 0; offset < size && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
-        Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
-        Cpa32U process_size = offset + chunk_size <= size ? chunk_size : size - offset;
-        memcpy(pDst + offset, pSrcBuffer, process_size);
-      }
-    }
-  }
-
-  Cpa32U max_used_buffer_num = iv_index > MAX_NUM_SYM_REQ_BATCH ? MAX_NUM_SYM_REQ_BATCH : iv_index;
-  for (Cpa32U i = 0; i < max_used_buffer_num; i++) {
-    memset(qcc_op_mem[avail_inst].src_buff[i], 0, chunk_size);
-    memset(qcc_op_mem[avail_inst].iv_buff[i], 0, ivLen);
-  }
-  return (status == CPA_STATUS_SUCCESS);
+                              Cpa32U ivLen,
+                              optional_yield y) {
+  QatCrypto crypto(y.get_io_context(), y.get_yield_context(), instance, sessionCtx, chunk_size);
+  return crypto.performOp(pSrc, pDst, size, pIv, ivLen);
 }
+
+void QccCrypto::symDpCallback(CpaCySymDpOpData *pOpData,
+                          CpaStatus status,
+                          CpaBoolean verifyResult)
+{
+  if (nullptr != pOpData->pCallbackTag)
+  {
+    ceph::async::post(std::move(static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion),
+                   boost::system::error_code{});
+  }
+}
+
+template <typename CompletionToken>
+auto QatCrypto::async_perform_op(CompletionToken&& token)
+{
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  using boost::asio::async_completion;
+  using Signature = void(boost::system::error_code);
+  async_completion<CompletionToken, Signature> init(token);
+  completion = Completion::create(context.get_executor(),
+                      std::move(init.completion_handler));
+  do {
+    status = cpaCySymDpEnqueueOpBatch(pOpDataVec.size(), &pOpDataVec[0], CPA_TRUE);
+  } while (status == CPA_STATUS_RETRY);
+  dout(1) << "async_perform_op" << status << "=?" << CPA_STATUS_SUCCESS << dendl;
+
+  return init.result.get();
+}
+
+bool QatCrypto::performOp(const Cpa8U *pSrc,
+                   Cpa8U *pDst,
+                   Cpa32U size,
+                   Cpa8U *pIv,
+                   Cpa32U ivLen) {
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  Cpa32U iv_index = 0;
+  Cpa32U offset = 0;
+  std::vector<QccCrypto::OPMEM> op_mem_used;
+  do {
+    QccCrypto::OPMEM opmem;
+    if (QccCrypto::op_mem.empty()) {
+      opmem = std::move(QccCrypto::OPMEM(chunk_size));
+    } else {
+      opmem = std::move(QccCrypto::op_mem.back());
+      QccCrypto::op_mem.pop_back();
+    }
+
+    CpaCySymDpOpData *pOpData = opmem.sym_op_data;
+    Cpa8U *pSrcBuffer = opmem.src_buff;
+    Cpa8U *pIvBuffer = opmem.iv_buff;
+
+    Cpa32U process_size = offset + chunk_size <= size ? chunk_size : size - offset;
+
+    memcpy(pSrcBuffer, pSrc + offset, process_size);
+    memcpy(pIvBuffer, &pIv[iv_index * ivLen], ivLen);
+
+    //pOpData assignment
+    pOpData->thisPhys = qaeVirtToPhysNUMA(pOpData);
+    pOpData->instanceHandle = cyInstHandle;
+    pOpData->sessionCtx = sessionCtx;
+    pOpData->pCallbackTag = nullptr;
+    pOpData->cryptoStartSrcOffsetInBytes = 0;
+    pOpData->messageLenToCipherInBytes = process_size;
+    pOpData->iv = qaeVirtToPhysNUMA(pIvBuffer);
+    pOpData->pIv = pIvBuffer;
+    pOpData->ivLenInBytes = ivLen;
+    pOpData->srcBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
+    pOpData->srcBufferLen = process_size;
+    pOpData->dstBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
+    pOpData->dstBufferLen = process_size;
+
+    offset += chunk_size;
+    iv_index++;
+    pOpDataVec.push_back(pOpData);
+    op_mem_used.push_back(std::move(opmem));
+  } while (offset < size);
+
+  pOpDataVec.back()->pCallbackTag = this;
+
+  dout(1) << "start async_perform_op" << dendl;
+
+  boost::system::error_code ec;
+  async_perform_op(yield[ec]);
+
+  dout(1) << "end async_perform_op" << dendl;
+
+  for(size_t i = 0, off = 0; off < size; off += chunk_size) {
+    Cpa32U process_size = off + chunk_size <= size ? chunk_size : size - off;
+    memcpy(pDst + off, op_mem_used[i].src_buff, process_size);
+    memset(op_mem_used[i].src_buff, 0, chunk_size);
+    memset(op_mem_used[i].iv_buff, 0, ivLen);
+  }
+
+  while(!op_mem_used.empty()) {
+    QccCrypto::op_mem.push_back(std::move(op_mem_used.back()));
+    op_mem_used.pop_back();
+  }
+
+  return true;
+}
+
+
