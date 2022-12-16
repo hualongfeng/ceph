@@ -21,43 +21,12 @@ static std::ostream& _prefix(std::ostream* _dout)
   return *_dout << "QccCrypto: ";
 }
 // -----------------------------------------------------------------------------
-class QatCrypto {
-  boost::asio::io_context& context;
-  yield_context yield;
-  struct Handler;
-  using Completion = ceph::async::Completion<void(boost::system::error_code)>;
-
-  template <typename CompletionToken>
-  auto async_perform_op(CompletionToken&& token);
-
-  CpaInstanceHandle cyInstHandle{nullptr};
-  CpaCySymSessionCtx sessionCtx{nullptr};
-  std::vector<CpaCySymDpOpData*> pOpDataVec;
-  size_t chunk_size;
-
- public:
-  std::unique_ptr<Completion> completion;
-  QatCrypto (boost::asio::io_context& context,
-             yield_context yield,
-             CpaInstanceHandle cyInstHandle,
-             CpaCySymSessionCtx sessionCtx,
-             size_t chunk_size
-             ) : context(context), yield(yield),
-                 cyInstHandle(cyInstHandle), sessionCtx(sessionCtx),
-                 chunk_size(chunk_size) {}
-  QatCrypto (const QatCrypto &qat) = delete;
-  // ~QatCrypto ();
-  bool performOp(const Cpa8U *pSrc,
-                 Cpa8U *pDst,
-                 Cpa32U size,
-                 Cpa8U *pIv,
-                 Cpa32U ivLen);
-};
 
 static std::mutex qcc_alloc_mutex;
 static std::mutex qcc_eng_mutex;
 static std::condition_variable alloc_cv;
 static std::atomic<bool> init_called = { false };
+std::vector<QccCrypto::OPMEM> QccCrypto::op_mem;
 
 void QccCrypto::cleanup() {
   icp_sal_userStop();
@@ -357,7 +326,13 @@ auto QatCrypto::async_perform_op(CompletionToken&& token)
   do {
     status = cpaCySymDpEnqueueOpBatch(pOpDataVec.size(), &pOpDataVec[0], CPA_TRUE);
   } while (status == CPA_STATUS_RETRY);
-  dout(1) << "async_perform_op" << status << "=?" << CPA_STATUS_SUCCESS << dendl;
+
+  dout(1) << "async_perform_op: " << status << "=?" << CPA_STATUS_SUCCESS << dendl;
+
+  if (status != CPA_STATUS_SUCCESS) {
+    auto ec = boost::system::error_code{status, boost::system::system_category()};
+    ceph::async::post(std::move(completion), ec);
+  }
 
   return init.result.get();
 }
@@ -373,11 +348,14 @@ bool QatCrypto::performOp(const Cpa8U *pSrc,
   std::vector<QccCrypto::OPMEM> op_mem_used;
   do {
     QccCrypto::OPMEM opmem;
-    if (QccCrypto::op_mem.empty()) {
-      opmem = std::move(QccCrypto::OPMEM(chunk_size));
-    } else {
-      opmem = std::move(QccCrypto::op_mem.back());
-      QccCrypto::op_mem.pop_back();
+    {
+      std::scoped_lock lock{qcc_alloc_mutex};
+      if (QccCrypto::op_mem.empty()) {
+        opmem = std::move(QccCrypto::OPMEM(chunk_size));
+      } else {
+        opmem = std::move(QccCrypto::op_mem.back());
+        QccCrypto::op_mem.pop_back();
+      }
     }
 
     CpaCySymDpOpData *pOpData = opmem.sym_op_data;
@@ -427,6 +405,7 @@ bool QatCrypto::performOp(const Cpa8U *pSrc,
   }
 
   while(!op_mem_used.empty()) {
+    std::scoped_lock lock{qcc_alloc_mutex};
     QccCrypto::op_mem.push_back(std::move(op_mem_used.back()));
     op_mem_used.pop_back();
   }

@@ -27,6 +27,39 @@ extern "C" {
 #include "qae_mem_utils.h"
 }
 
+class QatCrypto {
+  boost::asio::io_context& context;
+  yield_context yield;
+  struct Handler;
+  using Completion = ceph::async::Completion<void(boost::system::error_code)>;
+
+  template <typename CompletionToken>
+  auto async_perform_op(CompletionToken&& token);
+
+  CpaInstanceHandle cyInstHandle{nullptr};
+  CpaCySymSessionCtx sessionCtx{nullptr};
+  std::vector<CpaCySymDpOpData*> pOpDataVec;
+  size_t chunk_size;
+
+ public:
+  std::unique_ptr<Completion> completion;
+  QatCrypto (boost::asio::io_context& context,
+             yield_context yield,
+             CpaInstanceHandle cyInstHandle,
+             CpaCySymSessionCtx sessionCtx,
+             size_t chunk_size
+             ) : context(context), yield(yield),
+                 cyInstHandle(cyInstHandle), sessionCtx(sessionCtx),
+                 chunk_size(chunk_size) {}
+  QatCrypto (const QatCrypto &qat) = delete;
+  // ~QatCrypto ();
+  bool performOp(const Cpa8U *pSrc,
+                 Cpa8U *pDst,
+                 Cpa32U size,
+                 Cpa8U *pIv,
+                 Cpa32U ivLen);
+};
+
 class QccCrypto {
   static const size_t AES_256_IV_LEN = 16;
   static const size_t AES_256_KEY_SIZE = 32;
@@ -136,7 +169,7 @@ public:
     void cleanup();
 
     /*
-     * Crypto Polling Function & helpers
+     * Crypto Polling Function
      * This helps to retrieve data from the QAT rings and dispatching the
      * associated callbacks. For synchronous operation (like this one), QAT
      * library creates an internal callback for the operation.
@@ -161,9 +194,9 @@ public:
                             Cpa8U *pCipherKey,
                             CpaCySymCipherDirection cipherDirection);
 
-      static void symDpCallback(CpaCySymDpOpData *pOpData,
-                            CpaStatus status,
-                            CpaBoolean verifyResult);
+    static void symDpCallback(CpaCySymDpOpData *pOpData,
+                              CpaStatus status,
+                              CpaBoolean verifyResult);
 };
 
 
