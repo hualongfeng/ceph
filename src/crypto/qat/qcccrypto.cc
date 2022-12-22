@@ -9,6 +9,7 @@
 #include "common/errno.h"
 #include <atomic>
 #include <chrono>
+#include <utility>
 
 // -----------------------------------------------------------------------------
 #define dout_context g_ceph_context
@@ -26,7 +27,6 @@ static std::mutex qcc_alloc_mutex;
 static std::mutex qcc_eng_mutex;
 static std::condition_variable alloc_cv;
 static std::atomic<bool> init_called = { false };
-std::vector<QccCrypto::OPMEM> QccCrypto::op_mem;
 
 void QccCrypto::cleanup() {
   icp_sal_userStop();
@@ -37,7 +37,6 @@ void QccCrypto::cleanup() {
 }
 
 void QccCrypto::poll_instances(void) {
-  CpaStatus stat = CPA_STATUS_SUCCESS;
   while (!thread_stop) {
     for (auto instance: cyInstances) {
         icp_sal_CyPollDpInstance(instance, 0);
@@ -229,6 +228,7 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
                       reinterpret_cast<Cpa8U*>(iv),
                       AES_256_IV_LEN,
                       y);
+  qcc_contig_mem_free((void **)sessionCtx);
 }
 
 /*
@@ -299,7 +299,7 @@ bool QccCrypto::symPerformOp(CpaInstanceHandle instance,
                               Cpa8U *pIv,
                               Cpa32U ivLen,
                               optional_yield y) {
-  QatCrypto crypto(y.get_io_context(), y.get_yield_context(), instance, sessionCtx, chunk_size);
+  QatCrypto crypto(y.get_io_context(), y.get_yield_context(), instance, sessionCtx, chunk_size, this);
   return crypto.performOp(pSrc, pDst, size, pIv, ivLen);
 }
 
@@ -337,30 +337,47 @@ auto QatCrypto::async_perform_op(CompletionToken&& token)
   return init.result.get();
 }
 
+template <typename CompletionToken>
+auto QatCrypto::async_get_op_mem(CompletionToken&& token) {
+  using boost::asio::async_completion;
+  using Signature = void(boost::system::error_code);
+  async_completion<CompletionToken, Signature> init(token);
+  boost::asio::post(this->crypto->opmem_strand, [this, handler = init.completion_handler](){
+      if (crypto->op_mem.empty()) {
+        opmem = std::move(QccCrypto::OPMEM(chunk_size));
+        crypto->op_mem_capacity++;
+        dout(1) << "op_mem_capacity: " << crypto->op_mem_capacity << dendl;
+      } else {
+        opmem = std::move(crypto->op_mem.back());
+        crypto->op_mem.pop_back();
+      }
+      using boost::asio::asio_handler_invoke;
+      asio_handler_invoke(std::bind(handler, boost::system::error_code{}), &handler);
+  });
+  return init.result.get();
+}
+
 bool QatCrypto::performOp(const Cpa8U *pSrc,
                    Cpa8U *pDst,
                    Cpa32U size,
                    Cpa8U *pIv,
                    Cpa32U ivLen) {
-  CpaStatus status = CPA_STATUS_SUCCESS;
+  // CpaStatus status = CPA_STATUS_SUCCESS;
   Cpa32U iv_index = 0;
   Cpa32U offset = 0;
-  std::vector<QccCrypto::OPMEM> op_mem_used;
+
   do {
-    QccCrypto::OPMEM opmem;
-    {
-      std::scoped_lock lock{qcc_alloc_mutex};
-      if (QccCrypto::op_mem.empty()) {
-        opmem = std::move(QccCrypto::OPMEM(chunk_size));
-      } else {
-        opmem = std::move(QccCrypto::op_mem.back());
-        QccCrypto::op_mem.pop_back();
-      }
-    }
+
+    dout(1) << "start async_get_op_mem" << dendl;
+    // async_get_op_mem(yield);
+    async_get_op_mem(yield);
+    dout(1) << "end async_get_op_mem" << dendl;
 
     CpaCySymDpOpData *pOpData = opmem.sym_op_data;
     Cpa8U *pSrcBuffer = opmem.src_buff;
     Cpa8U *pIvBuffer = opmem.iv_buff;
+
+    ceph_assert(pOpData != nullptr && pSrcBuffer != nullptr && pIvBuffer != nullptr);
 
     Cpa32U process_size = offset + chunk_size <= size ? chunk_size : size - offset;
 
@@ -404,11 +421,15 @@ bool QatCrypto::performOp(const Cpa8U *pSrc,
     memset(op_mem_used[i].iv_buff, 0, ivLen);
   }
 
-  while(!op_mem_used.empty()) {
-    std::scoped_lock lock{qcc_alloc_mutex};
-    QccCrypto::op_mem.push_back(std::move(op_mem_used.back()));
-    op_mem_used.pop_back();
-  }
+
+  boost::asio::post(crypto->opmem_strand, [crypto = this->crypto, mem = std::move(op_mem_used)]()mutable{
+    dout(1) << "recycle op memory" << dendl;
+    while(!mem.empty()) {
+      crypto->op_mem.push_back(std::move(mem.back()));
+      mem.pop_back();
+    }
+    dout(1) << "end recycle op memory" << dendl;
+  });
 
   return true;
 }

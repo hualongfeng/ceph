@@ -27,40 +27,10 @@ extern "C" {
 #include "qae_mem_utils.h"
 }
 
-class QatCrypto {
-  boost::asio::io_context& context;
-  yield_context yield;
-  struct Handler;
-  using Completion = ceph::async::Completion<void(boost::system::error_code)>;
 
-  template <typename CompletionToken>
-  auto async_perform_op(CompletionToken&& token);
-
-  CpaInstanceHandle cyInstHandle{nullptr};
-  CpaCySymSessionCtx sessionCtx{nullptr};
-  std::vector<CpaCySymDpOpData*> pOpDataVec;
-  size_t chunk_size;
-
- public:
-  std::unique_ptr<Completion> completion;
-  QatCrypto (boost::asio::io_context& context,
-             yield_context yield,
-             CpaInstanceHandle cyInstHandle,
-             CpaCySymSessionCtx sessionCtx,
-             size_t chunk_size
-             ) : context(context), yield(yield),
-                 cyInstHandle(cyInstHandle), sessionCtx(sessionCtx),
-                 chunk_size(chunk_size) {}
-  QatCrypto (const QatCrypto &qat) = delete;
-  // ~QatCrypto ();
-  bool performOp(const Cpa8U *pSrc,
-                 Cpa8U *pDst,
-                 Cpa32U size,
-                 Cpa8U *pIv,
-                 Cpa32U ivLen);
-};
 
 class QccCrypto {
+  friend class QatCrypto;
   static const size_t AES_256_IV_LEN = 16;
   static const size_t AES_256_KEY_SIZE = 32;
   static const size_t MAX_NUM_SYM_REQ_BATCH = 32;
@@ -73,6 +43,8 @@ class QccCrypto {
   std::thread qat_poll_thread;
   bool thread_stop{false};
 
+  boost::asio::io_context::strand opmem_strand;
+  boost::asio::io_context::strand session_strand;
 public:
   struct OPMEM {
     CpaCySymDpOpData *sym_op_data{nullptr};
@@ -102,12 +74,13 @@ public:
     ~OPMEM();
     bool alloc_ok() {return (sym_op_data != nullptr) && (src_buff != nullptr) && (iv_buff != nullptr);}
   };
-  static std::vector<OPMEM> op_mem;
+  std::vector<OPMEM> op_mem;
+  size_t op_mem_capacity{0};
 
   public:
     CpaCySymCipherDirection qcc_op_type;
 
-    QccCrypto() {};
+    QccCrypto(boost::asio::io_context& context): opmem_strand(context), session_strand(context) {};
     ~QccCrypto() {};
 
     bool init(const size_t chunk_size);
@@ -199,5 +172,45 @@ public:
                               CpaBoolean verifyResult);
 };
 
+class QatCrypto {
+  boost::asio::io_context& context;
+  yield_context yield;
+  struct Handler;
+  using Completion = ceph::async::Completion<void(boost::system::error_code)>;
+
+  template <typename CompletionToken>
+  auto async_perform_op(CompletionToken&& token);
+
+  template <typename CompletionToken>
+  auto async_get_op_mem(CompletionToken&& token);
+
+  CpaInstanceHandle cyInstHandle{nullptr};
+  CpaCySymSessionCtx sessionCtx{nullptr};
+  std::vector<CpaCySymDpOpData*> pOpDataVec;
+  size_t chunk_size;
+  QccCrypto *crypto;
+
+  QccCrypto::OPMEM opmem;
+  std::vector<QccCrypto::OPMEM> op_mem_used;
+
+ public:
+  std::unique_ptr<Completion> completion;
+  QatCrypto (boost::asio::io_context& context,
+             yield_context yield,
+             CpaInstanceHandle cyInstHandle,
+             CpaCySymSessionCtx sessionCtx,
+             size_t chunk_size,
+             QccCrypto *crypto
+             ) : context(context), yield(yield),
+                 cyInstHandle(cyInstHandle), sessionCtx(sessionCtx),
+                 chunk_size(chunk_size), crypto(crypto) {}
+  QatCrypto (const QatCrypto &qat) = delete;
+  // ~QatCrypto ();
+  bool performOp(const Cpa8U *pSrc,
+                 Cpa8U *pDst,
+                 Cpa32U size,
+                 Cpa8U *pIv,
+                 Cpa32U ivLen);
+};
 
 #endif //QCCCRYPTO_H
