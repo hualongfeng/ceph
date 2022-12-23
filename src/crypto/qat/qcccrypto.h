@@ -15,6 +15,8 @@
 #include "include/rados/librados_fwd.hpp"
 #include <memory>
 #include "common/ceph_mutex.h"
+#include <vector>
+#include <map>
 extern "C" {
 #include "cpa.h"
 #include "cpa_cy_sym_dp.h"
@@ -26,8 +28,6 @@ extern "C" {
 #include "icp_sal_poll.h"
 #include "qae_mem_utils.h"
 }
-
-
 
 class QccCrypto {
   friend class QatCrypto;
@@ -74,8 +74,10 @@ public:
     ~OPMEM();
     bool alloc_ok() {return (sym_op_data != nullptr) && (src_buff != nullptr) && (iv_buff != nullptr);}
   };
-  std::vector<OPMEM> op_mem;
+  std::vector<OPMEM> op_mem_pool;
   size_t op_mem_capacity{0};
+  std::map<CpaInstanceHandle, std::vector<CpaCySymSessionCtx>> session_pool;
+  size_t session_capacity{0};
 
   public:
     CpaCySymCipherDirection qcc_op_type;
@@ -195,6 +197,7 @@ class QatCrypto {
 
  public:
   std::unique_ptr<Completion> completion;
+  std::unique_ptr<Completion> op_mem_completion;
   QatCrypto (boost::asio::io_context& context,
              yield_context yield,
              CpaInstanceHandle cyInstHandle,

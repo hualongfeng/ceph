@@ -228,6 +228,8 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
                       reinterpret_cast<Cpa8U*>(iv),
                       AES_256_IV_LEN,
                       y);
+  // symSessionWaitForInflightReq(sessionCtx);
+  cpaCySymDpRemoveSession(instance, sessionCtx);
   qcc_contig_mem_free((void **)sessionCtx);
 }
 
@@ -331,7 +333,7 @@ auto QatCrypto::async_perform_op(CompletionToken&& token)
 
   if (status != CPA_STATUS_SUCCESS) {
     auto ec = boost::system::error_code{status, boost::system::system_category()};
-    ceph::async::post(std::move(completion), ec);
+    ceph::async::dispatch(std::move(completion), ec);
   }
 
   return init.result.get();
@@ -342,20 +344,42 @@ auto QatCrypto::async_get_op_mem(CompletionToken&& token) {
   using boost::asio::async_completion;
   using Signature = void(boost::system::error_code);
   async_completion<CompletionToken, Signature> init(token);
-  boost::asio::post(this->crypto->opmem_strand, [this, handler = init.completion_handler](){
-      if (crypto->op_mem.empty()) {
-        opmem = std::move(QccCrypto::OPMEM(chunk_size));
-        crypto->op_mem_capacity++;
-        dout(1) << "op_mem_capacity: " << crypto->op_mem_capacity << dendl;
-      } else {
-        opmem = std::move(crypto->op_mem.back());
-        crypto->op_mem.pop_back();
-      }
-      using boost::asio::asio_handler_invoke;
-      asio_handler_invoke(std::bind(handler, boost::system::error_code{}), &handler);
+  op_mem_completion = Completion::create(context.get_executor(),
+                      std::move(init.completion_handler));
+  boost::asio::post(this->crypto->opmem_strand, [this](){
+    if (crypto->op_mem_pool.empty()) {
+      opmem = std::move(QccCrypto::OPMEM(chunk_size));
+      crypto->op_mem_capacity++;
+      dout(10) << "op_mem_capacity: " << crypto->op_mem_capacity << dendl;
+    } else {
+      opmem = std::move(crypto->op_mem_pool.back());
+      crypto->op_mem_pool.pop_back();
+    }
+    ceph::async::post(std::move(op_mem_completion), boost::system::error_code{});
   });
   return init.result.get();
 }
+
+// template <typename CompletionToken>
+// auto QatCrypto::async_get_session(CompletionToken&& token) {
+//   using boost::asio::async_completion;
+//   using Signature = void(boost::system::error_code);
+//   async_completion<CompletionToken, Signature> init(token);
+//   op_mem_completion = Completion::create(context.get_executor(),
+//                       std::move(init.completion_handler));
+//   boost::asio::post(this->crypto->session_strand, [this](){
+//     if (crypto->session_pool.empty()) {
+//       opmem = std::move(QccCrypto::OPMEM(chunk_size));
+//       crypto->session_capacity++;
+//       dout(10) << "op_mem_capacity: " << crypto->op_mem_capacity << dendl;
+//     } else {
+//       sessionCtx = crypto->session_pool.back();
+//       crypto->session_pool.pop_back();
+//     }
+//     ceph::async::post(std::move(op_mem_completion), boost::system::error_code{});
+//   });
+//   return init.result.get();
+// }
 
 bool QatCrypto::performOp(const Cpa8U *pSrc,
                    Cpa8U *pDst,
@@ -369,8 +393,8 @@ bool QatCrypto::performOp(const Cpa8U *pSrc,
   do {
 
     dout(1) << "start async_get_op_mem" << dendl;
-    // async_get_op_mem(yield);
-    async_get_op_mem(yield);
+    boost::system::error_code ec;
+    async_get_op_mem(yield[ec]);
     dout(1) << "end async_get_op_mem" << dendl;
 
     CpaCySymDpOpData *pOpData = opmem.sym_op_data;
@@ -422,10 +446,11 @@ bool QatCrypto::performOp(const Cpa8U *pSrc,
   }
 
 
-  boost::asio::post(crypto->opmem_strand, [crypto = this->crypto, mem = std::move(op_mem_used)]()mutable{
+  boost::asio::post(crypto->opmem_strand, [crypto = this->crypto, mem_used = std::move(op_mem_used)]()mutable{
     dout(1) << "recycle op memory" << dendl;
+    auto mem = std::move(mem_used);
     while(!mem.empty()) {
-      crypto->op_mem.push_back(std::move(mem.back()));
+      crypto->op_mem_pool.push_back(std::move(mem.back()));
       mem.pop_back();
     }
     dout(1) << "end recycle op memory" << dendl;
