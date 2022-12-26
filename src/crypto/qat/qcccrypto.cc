@@ -210,27 +210,15 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
 
   CpaInstanceHandle instance = cyInstances[index++ % numInstances];
 
-  CpaCySymSessionCtx sessionCtx{nullptr};
-  status = initSession(instance, &sessionCtx,
-                       (Cpa8U *)key,
-                       op_type);
-
-  if (unlikely(status != CPA_STATUS_SUCCESS)) {
-    derr << "Unable to init session with status =" << status << dendl;
-    return false;
-  }
 
   return symPerformOp(instance,
-                      sessionCtx,
                       in,
                       out,
                       size,
                       reinterpret_cast<Cpa8U*>(iv),
                       AES_256_IV_LEN,
+                      key, op_type,
                       y);
-  // symSessionWaitForInflightReq(sessionCtx);
-  cpaCySymDpRemoveSession(instance, sessionCtx);
-  qcc_contig_mem_free((void **)sessionCtx);
 }
 
 /*
@@ -294,14 +282,15 @@ CpaStatus QccCrypto::initSession(CpaInstanceHandle cyInstHandle,
 }
 
 bool QccCrypto::symPerformOp(CpaInstanceHandle instance,
-                              CpaCySymSessionCtx sessionCtx,
                               const Cpa8U *pSrc,
                               Cpa8U *pDst,
                               Cpa32U size,
                               Cpa8U *pIv,
                               Cpa32U ivLen,
+                              Cpa8U *key,
+                              CpaCySymCipherDirection op_type,
                               optional_yield y) {
-  QatCrypto crypto(y.get_io_context(), y.get_yield_context(), instance, sessionCtx, chunk_size, this);
+  QatCrypto crypto(y.get_io_context(), y.get_yield_context(), instance, chunk_size, this, key, op_type);
   return crypto.performOp(pSrc, pDst, size, pIv, ivLen);
 }
 
@@ -346,7 +335,7 @@ auto QatCrypto::async_get_op_mem(CompletionToken&& token) {
   async_completion<CompletionToken, Signature> init(token);
   op_mem_completion = Completion::create(context.get_executor(),
                       std::move(init.completion_handler));
-  boost::asio::post(this->crypto->opmem_strand, [this](){
+  boost::asio::post(this->crypto->opmem_strand, [this]()mutable{
     if (crypto->op_mem_pool.empty()) {
       opmem = std::move(QccCrypto::OPMEM(chunk_size));
       crypto->op_mem_capacity++;
@@ -360,26 +349,31 @@ auto QatCrypto::async_get_op_mem(CompletionToken&& token) {
   return init.result.get();
 }
 
-// template <typename CompletionToken>
-// auto QatCrypto::async_get_session(CompletionToken&& token) {
-//   using boost::asio::async_completion;
-//   using Signature = void(boost::system::error_code);
-//   async_completion<CompletionToken, Signature> init(token);
-//   op_mem_completion = Completion::create(context.get_executor(),
-//                       std::move(init.completion_handler));
-//   boost::asio::post(this->crypto->session_strand, [this](){
-//     if (crypto->session_pool.empty()) {
-//       opmem = std::move(QccCrypto::OPMEM(chunk_size));
-//       crypto->session_capacity++;
-//       dout(10) << "op_mem_capacity: " << crypto->op_mem_capacity << dendl;
-//     } else {
-//       sessionCtx = crypto->session_pool.back();
-//       crypto->session_pool.pop_back();
-//     }
-//     ceph::async::post(std::move(op_mem_completion), boost::system::error_code{});
-//   });
-//   return init.result.get();
-// }
+template <typename CompletionToken>
+auto QatCrypto::async_get_session(CompletionToken&& token) {
+  using boost::asio::async_completion;
+  using Signature = void(boost::system::error_code);
+  async_completion<CompletionToken, Signature> init(token);
+  session_completion = Completion::create(context.get_executor(),
+                      std::move(init.completion_handler));
+  boost::asio::post(this->crypto->session_strand, [this]()mutable{
+    CpaStatus status = CPA_STATUS_SUCCESS;
+    dout(10) << "async_get_session" << dendl;
+    if (crypto->session_pool[cyInstHandle].empty()) {
+      status = crypto->initSession(cyInstHandle, &sessionCtx,
+                          (Cpa8U *)key,
+                          op_type);
+      crypto->session_capacity++;
+      dout(10) << "session_capacity: " << crypto->session_capacity << dendl;
+    } else {
+      sessionCtx = crypto->session_pool[cyInstHandle].back();
+      crypto->session_pool[cyInstHandle].pop_back();
+      status = crypto->updateSession(sessionCtx, (Cpa8U *)key, op_type);
+    }
+    ceph::async::post(std::move(session_completion), boost::system::error_code{status, boost::system::generic_category()});
+  });
+  return init.result.get();
+}
 
 bool QatCrypto::performOp(const Cpa8U *pSrc,
                    Cpa8U *pDst,
@@ -390,12 +384,17 @@ bool QatCrypto::performOp(const Cpa8U *pSrc,
   Cpa32U iv_index = 0;
   Cpa32U offset = 0;
 
-  do {
+  dout(10) << "start async get session" << dendl;
+  boost::system::error_code ec;
+  async_get_session(yield[ec]);
+  dout(10) << "end async get session: " << ec.value() << dendl;
 
-    dout(1) << "start async_get_op_mem" << dendl;
+  do {
+    dout(10) << "start async_get_op_mem" << dendl;
     boost::system::error_code ec;
     async_get_op_mem(yield[ec]);
-    dout(1) << "end async_get_op_mem" << dendl;
+    dout(10) << "end async_get_op_mem" << dendl;
+
 
     CpaCySymDpOpData *pOpData = opmem.sym_op_data;
     Cpa8U *pSrcBuffer = opmem.src_buff;
@@ -431,12 +430,12 @@ bool QatCrypto::performOp(const Cpa8U *pSrc,
 
   pOpDataVec.back()->pCallbackTag = this;
 
-  dout(1) << "start async_perform_op" << dendl;
+  dout(10) << "start async_perform_op" << dendl;
 
-  boost::system::error_code ec;
+  // boost::system::error_code ec;
   async_perform_op(yield[ec]);
 
-  dout(1) << "end async_perform_op" << dendl;
+  dout(10) << "end async_perform_op" << dendl;
 
   for(size_t i = 0, off = 0; off < size; off += chunk_size) {
     Cpa32U process_size = off + chunk_size <= size ? chunk_size : size - off;
@@ -447,13 +446,20 @@ bool QatCrypto::performOp(const Cpa8U *pSrc,
 
 
   boost::asio::post(crypto->opmem_strand, [crypto = this->crypto, mem_used = std::move(op_mem_used)]()mutable{
-    dout(1) << "recycle op memory" << dendl;
+    dout(10) << "recycle op memory" << dendl;
     auto mem = std::move(mem_used);
     while(!mem.empty()) {
       crypto->op_mem_pool.push_back(std::move(mem.back()));
       mem.pop_back();
     }
-    dout(1) << "end recycle op memory" << dendl;
+    dout(10) << "end recycle op memory" << dendl;
+  });
+
+  boost::asio::post(crypto->session_strand, [cyInstHandle = this->cyInstHandle, crypto = this->crypto, sessionCtx = this->sessionCtx]()mutable{
+    dout(10) << "recycle session" << dendl;
+    crypto->session_pool[cyInstHandle].push_back(sessionCtx);
+
+    dout(10) << "end recycle sessiony" << dendl;
   });
 
   return true;

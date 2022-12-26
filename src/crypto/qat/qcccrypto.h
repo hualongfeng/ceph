@@ -152,12 +152,13 @@ public:
     void poll_instances(void);
 
     bool symPerformOp(CpaInstanceHandle instance,
-                      CpaCySymSessionCtx sessionCtx,
                       const Cpa8U *pSrc,
                       Cpa8U *pDst,
                       Cpa32U size,
                       Cpa8U *pIv,
                       Cpa32U ivLen,
+                      Cpa8U *key,
+                      CpaCySymCipherDirection op_type,
                       optional_yield y);
 
     CpaStatus initSession(CpaInstanceHandle cyInstHandle,
@@ -186,11 +187,16 @@ class QatCrypto {
   template <typename CompletionToken>
   auto async_get_op_mem(CompletionToken&& token);
 
+  template <typename CompletionToken>
+  auto async_get_session(CompletionToken&& token);
+
   CpaInstanceHandle cyInstHandle{nullptr};
   CpaCySymSessionCtx sessionCtx{nullptr};
   std::vector<CpaCySymDpOpData*> pOpDataVec;
   size_t chunk_size;
   QccCrypto *crypto;
+  Cpa8U *key;
+  CpaCySymCipherDirection op_type;
 
   QccCrypto::OPMEM opmem;
   std::vector<QccCrypto::OPMEM> op_mem_used;
@@ -198,15 +204,18 @@ class QatCrypto {
  public:
   std::unique_ptr<Completion> completion;
   std::unique_ptr<Completion> op_mem_completion;
+  std::unique_ptr<Completion> session_completion;
   QatCrypto (boost::asio::io_context& context,
              yield_context yield,
              CpaInstanceHandle cyInstHandle,
-             CpaCySymSessionCtx sessionCtx,
              size_t chunk_size,
-             QccCrypto *crypto
+             QccCrypto *crypto,
+             Cpa8U *key,
+             CpaCySymCipherDirection op_type
              ) : context(context), yield(yield),
-                 cyInstHandle(cyInstHandle), sessionCtx(sessionCtx),
-                 chunk_size(chunk_size), crypto(crypto) {}
+                 cyInstHandle(cyInstHandle),
+                 chunk_size(chunk_size), crypto(crypto),
+                 key(key), op_type(op_type) {}
   QatCrypto (const QatCrypto &qat) = delete;
   // ~QatCrypto ();
   bool performOp(const Cpa8U *pSrc,
