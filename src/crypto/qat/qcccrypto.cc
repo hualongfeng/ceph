@@ -262,11 +262,13 @@ CpaStatus QccCrypto::initSession(CpaInstanceHandle cyInstHandle,
   sessionSetupData.cipherSetupData.pCipherKey = pCipherKey;
   sessionSetupData.cipherSetupData.cipherDirection = cipherDirection;
 
-  status = cpaCySymDpSessionCtxGetSize(cyInstHandle, &sessionSetupData, &sessionCtxSize);
-  if (likely(CPA_STATUS_SUCCESS == status)) {
-    status = qcc_contig_mem_alloc((void **)(sessionCtx), sessionCtxSize);
-  } else {
-    dout(1) << "cpaCySymDpSessionCtxGetSize failed with status = " << status << dendl;
+  if ((*sessionCtx) == nullptr) {
+    status = cpaCySymDpSessionCtxGetSize(cyInstHandle, &sessionSetupData, &sessionCtxSize);
+    if (likely(CPA_STATUS_SUCCESS == status)) {
+      status = qcc_contig_mem_alloc((void **)(sessionCtx), sessionCtxSize);
+    } else {
+      dout(1) << "cpaCySymDpSessionCtxGetSize failed with status = " << status << dendl;
+    }
   }
   if (likely(CPA_STATUS_SUCCESS == status)) {
     status = cpaCySymDpInitSession(cyInstHandle,
@@ -339,7 +341,7 @@ auto QatCrypto::async_get_op_mem(CompletionToken&& token) {
     if (crypto->op_mem_pool.empty()) {
       opmem = std::move(QccCrypto::OPMEM(chunk_size));
       crypto->op_mem_capacity++;
-      dout(10) << "op_mem_capacity: " << crypto->op_mem_capacity << dendl;
+      dout(1) << "op_mem_capacity: " << crypto->op_mem_capacity << dendl;
     } else {
       opmem = std::move(crypto->op_mem_pool.back());
       crypto->op_mem_pool.pop_back();
@@ -358,17 +360,19 @@ auto QatCrypto::async_get_session(CompletionToken&& token) {
                       std::move(init.completion_handler));
   boost::asio::post(this->crypto->session_strand, [this]()mutable{
     CpaStatus status = CPA_STATUS_SUCCESS;
-    dout(10) << "async_get_session" << dendl;
-    if (crypto->session_pool[cyInstHandle].empty()) {
+    dout(1) << "async_get_session" << dendl;
+    if (crypto->session_pool.empty()) {
       status = crypto->initSession(cyInstHandle, &sessionCtx,
                           (Cpa8U *)key,
                           op_type);
       crypto->session_capacity++;
-      dout(10) << "session_capacity: " << crypto->session_capacity << dendl;
+      dout(1) << "session_capacity: " << crypto->session_capacity << dendl;
     } else {
-      sessionCtx = crypto->session_pool[cyInstHandle].back();
-      crypto->session_pool[cyInstHandle].pop_back();
-      status = crypto->updateSession(sessionCtx, (Cpa8U *)key, op_type);
+      sessionCtx = crypto->session_pool.back();
+      crypto->session_pool.pop_back();
+      status = crypto->initSession(cyInstHandle, &sessionCtx,
+                          (Cpa8U *)key,
+                          op_type);
     }
     ceph::async::post(std::move(session_completion), boost::system::error_code{status, boost::system::generic_category()});
   });
@@ -384,16 +388,16 @@ bool QatCrypto::performOp(const Cpa8U *pSrc,
   Cpa32U iv_index = 0;
   Cpa32U offset = 0;
 
-  dout(10) << "start async get session" << dendl;
+  dout(1) << "start async get session" << dendl;
   boost::system::error_code ec;
   async_get_session(yield[ec]);
-  dout(10) << "end async get session: " << ec.value() << dendl;
+  dout(1) << "end async get session: " << ec.value() << dendl;
 
   do {
-    dout(10) << "start async_get_op_mem" << dendl;
+    dout(1) << "start async_get_op_mem" << dendl;
     boost::system::error_code ec;
     async_get_op_mem(yield[ec]);
-    dout(10) << "end async_get_op_mem" << dendl;
+    dout(1) << "end async_get_op_mem" << dendl;
 
 
     CpaCySymDpOpData *pOpData = opmem.sym_op_data;
@@ -430,12 +434,12 @@ bool QatCrypto::performOp(const Cpa8U *pSrc,
 
   pOpDataVec.back()->pCallbackTag = this;
 
-  dout(10) << "start async_perform_op" << dendl;
+  dout(1) << "start async_perform_op" << dendl;
 
   // boost::system::error_code ec;
   async_perform_op(yield[ec]);
 
-  dout(10) << "end async_perform_op" << dendl;
+  dout(1) << "end async_perform_op" << dendl;
 
   for(size_t i = 0, off = 0; off < size; off += chunk_size) {
     Cpa32U process_size = off + chunk_size <= size ? chunk_size : size - off;
@@ -446,20 +450,21 @@ bool QatCrypto::performOp(const Cpa8U *pSrc,
 
 
   boost::asio::post(crypto->opmem_strand, [crypto = this->crypto, mem_used = std::move(op_mem_used)]()mutable{
-    dout(10) << "recycle op memory" << dendl;
+    dout(1) << "recycle op memory" << dendl;
     auto mem = std::move(mem_used);
     while(!mem.empty()) {
       crypto->op_mem_pool.push_back(std::move(mem.back()));
       mem.pop_back();
     }
-    dout(10) << "end recycle op memory" << dendl;
+    dout(1) << "end recycle op memory" << dendl;
   });
 
   boost::asio::post(crypto->session_strand, [cyInstHandle = this->cyInstHandle, crypto = this->crypto, sessionCtx = this->sessionCtx]()mutable{
-    dout(10) << "recycle session" << dendl;
-    crypto->session_pool[cyInstHandle].push_back(sessionCtx);
+    dout(1) << "recycle session" << dendl;
+    crypto->session_pool.push_back(sessionCtx);
+    cpaCySymDpRemoveSession(cyInstHandle, sessionCtx);
 
-    dout(10) << "end recycle sessiony" << dendl;
+    dout(1) << "end recycle sessiony" << dendl;
   });
 
   return true;

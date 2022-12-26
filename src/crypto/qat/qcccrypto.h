@@ -76,7 +76,7 @@ public:
   };
   std::vector<OPMEM> op_mem_pool;
   size_t op_mem_capacity{0};
-  std::map<CpaInstanceHandle, std::vector<CpaCySymSessionCtx>> session_pool;
+  std::vector<CpaCySymSessionCtx> session_pool;
   size_t session_capacity{0};
 
   public:
