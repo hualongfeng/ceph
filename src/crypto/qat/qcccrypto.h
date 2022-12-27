@@ -78,6 +78,7 @@ public:
   size_t op_mem_capacity{0};
   std::vector<CpaCySymSessionCtx> session_pool;
   size_t session_capacity{0};
+  std::vector<std::function<void()>> session_vec;
 
   public:
     CpaCySymCipherDirection qcc_op_type;
@@ -223,6 +224,8 @@ class QatCrypto {
                  Cpa32U size,
                  Cpa8U *pIv,
                  Cpa32U ivLen);
+  
+  void post();
 };
 
 #endif //QCCCRYPTO_H
