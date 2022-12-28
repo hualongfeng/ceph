@@ -11,6 +11,11 @@
 #include <queue>
 #include <memory>
 #include "common/async/yield_context.h"
+#include "common/async/completion.h"
+#include "include/rados/librados_fwd.hpp"
+#include <memory>
+#include "common/ceph_mutex.h"
+#include <vector>
 extern "C" {
 #include "cpa.h"
 #include "cpa_cy_sym_dp.h"
@@ -24,7 +29,22 @@ extern "C" {
 }
 
 class QccCrypto {
+  friend class QatCrypto;
   size_t chunk_size;
+
+      using Completion = ceph::async::Completion<void(boost::system::error_code)>;
+
+    // template <typename CompletionToken>
+    // auto async_perform_op(CompletionToken&& token);
+    // template <typename ExecutionContext, typename CompletionToken>
+    // auto async_perform_op(ExecutionContext& ctx, int avail_inst, std::vector<CpaCySymDpOpData*>& pOpDataVec, CompletionToken&& token);
+
+
+    // used for get instance and put instance
+    std::unique_ptr<Completion> completion;
+
+    // one completion per instance
+    std::vector<std::unique_ptr<Completion>> op_completions;
 
   public:
     CpaCySymCipherDirection qcc_op_type;
@@ -160,7 +180,8 @@ class QccCrypto {
                       Cpa8U *pDst,
                       Cpa32U size,
                       Cpa8U *pIv,
-                      Cpa32U ivLen);
+                      Cpa32U ivLen,
+                      optional_yield y);
 
     CpaStatus initSession(CpaInstanceHandle cyInstHandle,
                           CpaCySymSessionCtx *sessionCtx,
@@ -170,5 +191,43 @@ class QccCrypto {
     CpaStatus updateSession(CpaCySymSessionCtx sessionCtx,
                             Cpa8U *pCipherKey,
                             CpaCySymCipherDirection cipherDirection);
+
+
+};
+
+class QatCrypto {
+  boost::asio::io_context& context;
+  yield_context yield;
+  struct Handler;
+  using Completion = ceph::async::Completion<void(boost::system::error_code)>;
+
+ public:
+  std::unique_ptr<Completion> completion;
+  std::atomic<std::size_t> count;
+  std::mutex mutex;
+  bool complete() {
+    std::scoped_lock lock{mutex};
+    count--;
+    // if (count == 0) {
+    //   cv.notify_one();
+    // }
+    return (count == 0);
+  }
+
+  void add_one() {
+    count++;
+  }
+
+  QatCrypto (boost::asio::io_context& context,
+             yield_context yield
+             ) : context(context), yield(yield) {}
+  QatCrypto (const QatCrypto &qat) = delete;
+  QatCrypto (QatCrypto &&qat) = delete;
+  void operator=(const QatCrypto &qat) = delete;
+  void operator=(QatCrypto &&qat) = delete;
+
+  template <typename CompletionToken>
+  auto async_perform_op(int avail_inst, std::vector<CpaCySymDpOpData*>& pOpDataVec, CompletionToken&& token);
+
 };
 #endif //QCCCRYPTO_H

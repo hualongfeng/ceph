@@ -57,8 +57,14 @@ static void symDpCallback(CpaCySymDpOpData *pOpData,
 {
   if (nullptr != pOpData->pCallbackTag)
   {
-    auto complete = static_cast<CompletionHandle*>(pOpData->pCallbackTag);
-    complete->complete();
+    // auto complete = static_cast<CompletionHandle*>(pOpData->pCallbackTag);
+    // complete->complete();
+    // dout(1) << "symDpCallback: " << pOpData->pCallbackTag << dendl;
+    if (static_cast<QatCrypto*>(pOpData->pCallbackTag)->complete()) {
+      dout(1) << "symDpCallback post" << dendl;
+      ceph::async::post(std::move(static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion),
+      boost::system::error_code{});
+    }
   }
 }
 
@@ -168,6 +174,7 @@ bool QccCrypto::init(const size_t chunk_size) {
     return false;
   }
   dout(1) << "Get instances num: " << qcc_inst->num_instances << dendl;
+  op_completions.resize(qcc_inst->num_instances);
 
   int iter = 0;
   //Start Instances
@@ -312,7 +319,7 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
   dout(10) << "Using dp_batch inst " << avail_inst << dendl;
 
 
-  auto sg = make_scope_guard([=] {
+  auto sg = make_scope_guard([this, avail_inst] {
       //free up the instance irrespective of the op status
       dout(15) << "Completed task under " << avail_inst << dendl;
       qcc_op_mem[avail_inst].op_complete = false;
@@ -372,7 +379,7 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
                       out,
                       size,
                       reinterpret_cast<Cpa8U*>(iv),
-                      AES_256_IV_LEN);
+                      AES_256_IV_LEN, y);
 }
 
 /*
@@ -435,18 +442,43 @@ CpaStatus QccCrypto::initSession(CpaInstanceHandle cyInstHandle,
   return status;
 }
 
+template <typename CompletionToken>
+auto QatCrypto::async_perform_op(int avail_inst, std::vector<CpaCySymDpOpData*>& pOpDataVec, CompletionToken&& token) {
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  using boost::asio::async_completion;
+  using Signature = void(boost::system::error_code);
+  async_completion<CompletionToken, Signature> init(token);
+  completion = Completion::create(context.get_executor(),
+                      std::move(init.completion_handler));
+  // op_completions[avail_inst] = std::move(completion);
+  do {
+    status = cpaCySymDpEnqueueOpBatch(pOpDataVec.size(), &pOpDataVec[0], CPA_TRUE);
+  } while (status == CPA_STATUS_RETRY);
+
+  dout(1) << "async_perform_op: " << status << "=?" << CPA_STATUS_SUCCESS << dendl;
+
+  if (status != CPA_STATUS_SUCCESS) {
+    auto ec = boost::system::error_code{status, boost::system::system_category()};
+    ceph::async::dispatch(std::move(completion), ec);
+  }
+  return init.result.get();
+}
+
 bool QccCrypto::symPerformOp(int avail_inst,
                               CpaCySymSessionCtx sessionCtx,
                               const Cpa8U *pSrc,
                               Cpa8U *pDst,
                               Cpa32U size,
                               Cpa8U *pIv,
-                              Cpa32U ivLen) {
+                              Cpa32U ivLen,
+                              optional_yield y) {
   CpaStatus status = CPA_STATUS_SUCCESS;
   Cpa32U one_batch_size = chunk_size * MAX_NUM_SYM_REQ_BATCH;
   Cpa32U iv_index = 0;
   for (Cpa32U off = 0; off < size; off += one_batch_size) {
     CompletionHandle complete;
+    QatCrypto helper(y.get_io_context(), y.get_yield_context());
+    std::vector<CpaCySymDpOpData*> pOpDataVec;
     for (Cpa32U offset = off, i = 0; offset < size && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
       CpaCySymDpOpData *pOpData = qcc_op_mem[avail_inst].sym_op_data[i];
       Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
@@ -460,12 +492,13 @@ bool QccCrypto::symPerformOp(int avail_inst,
         iv_index++;
 
         complete.add_one();
+        helper.count++;
 
         //pOpData assignment
         pOpData->thisPhys = qaeVirtToPhysNUMA(pOpData);
         pOpData->instanceHandle = qcc_inst->cy_inst_handles[avail_inst];
         pOpData->sessionCtx = sessionCtx;
-        pOpData->pCallbackTag = (void *)&complete;
+        pOpData->pCallbackTag = &helper; //nullptr; //(void *)&complete;
         pOpData->cryptoStartSrcOffsetInBytes = 0;
         pOpData->messageLenToCipherInBytes = process_size;
         pOpData->iv = qaeVirtToPhysNUMA(pIvBuffer);
@@ -476,26 +509,36 @@ bool QccCrypto::symPerformOp(int avail_inst,
         pOpData->dstBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
         pOpData->dstBufferLen = process_size;
 
-        status = cpaCySymDpEnqueueOp(pOpData, CPA_FALSE);
-        if (unlikely(CPA_STATUS_SUCCESS != status)) {
-          dout(1) << "cpaCySymDpEnqueueOp failed. (status = " << status << ")" << dendl;
-          // submit all request, clean the queue
-          cpaCySymDpPerformOpNow(qcc_inst->cy_inst_handles[avail_inst]);
-          return false;
-        }
+        pOpDataVec.push_back(pOpData);
+
+        // status = cpaCySymDpEnqueueOp(pOpData, CPA_FALSE);
+        // if (unlikely(CPA_STATUS_SUCCESS != status)) {
+        //   dout(1) << "cpaCySymDpEnqueueOp failed. (status = " << status << ")" << dendl;
+        //   // submit all request, clean the queue
+        //   cpaCySymDpPerformOpNow(qcc_inst->cy_inst_handles[avail_inst]);
+        //   return false;
+        // }
       }
     }
 
-    if (likely(CPA_STATUS_SUCCESS == status)) {
-      status = cpaCySymDpPerformOpNow(qcc_inst->cy_inst_handles[avail_inst]);
-      if (unlikely(CPA_STATUS_SUCCESS != status)) {
-        dout(1) << "cpaCySymDpPerformOpNow failed. (status = " << status << ")" << dendl;
-        return false;
-      }
-    }
+    // if (likely(CPA_STATUS_SUCCESS == status)) {
+    //   status = cpaCySymDpPerformOpNow(qcc_inst->cy_inst_handles[avail_inst]);
+    //   if (unlikely(CPA_STATUS_SUCCESS != status)) {
+    //     dout(1) << "cpaCySymDpPerformOpNow failed. (status = " << status << ")" << dendl;
+    //     return false;
+    //   }
+    // }
 
+    boost::system::error_code ec;
+    yield_context yield = y.get_yield_context();
+
+    //pOpDataVec.back()->pCallbackTag = &helper;
+    // dout(1) << "async_perform_op: " << pOpDataVec.back()->pCallbackTag << dendl;
+    helper.async_perform_op(avail_inst, pOpDataVec, yield[ec]);
+    dout(1) << "end async_perform_op: " << pOpDataVec.back()->pCallbackTag << dendl;
+    // dout(1) << "async_perform_op: " << status << "=?" << CPA_STATUS_SUCCESS << dendl;
     if (likely(CPA_STATUS_SUCCESS == status)) {
-      complete.wait();
+      // complete.wait();
       // Copy data back to pDst buffer
       for (Cpa32U offset = off, i = 0; offset < size && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
         Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
