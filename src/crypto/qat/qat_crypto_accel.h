@@ -23,7 +23,7 @@
 class QccCryptoAccel : public CryptoAccel {
   public:
     QccCrypto qcccrypto;
-    QccCryptoAccel(const size_t chunk_size) { qcccrypto.init(chunk_size); };
+    QccCryptoAccel(const size_t chunk_size, boost::asio::io_context& context):qcccrypto(context) { qcccrypto.init(chunk_size); };
     ~QccCryptoAccel() { qcccrypto.destroy(); };
 
     bool cbc_encrypt(unsigned char* out, const unsigned char* in, size_t size,

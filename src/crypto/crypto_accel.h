@@ -25,7 +25,7 @@ typedef std::shared_ptr<CryptoAccel> CryptoAccelRef;
 class CryptoAccel {
  public:
   CryptoAccel() {}
-  CryptoAccel(const size_t chunk_size) {}
+  CryptoAccel(const size_t chunk_size, boost::asio::io_context& context) {}
   virtual ~CryptoAccel() {}
 
   static const int AES_256_IVSIZE = 128/8;

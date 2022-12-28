@@ -8,6 +8,7 @@
 #include "common/dout.h"
 #include "common/errno.h"
 #include <atomic>
+#include <utility>
 
 // -----------------------------------------------------------------------------
 #define dout_context g_ceph_context

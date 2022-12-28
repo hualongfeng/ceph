@@ -46,10 +46,12 @@ class QccCrypto {
     // one completion per instance
     std::vector<std::unique_ptr<Completion>> op_completions;
 
+    boost::asio::io_context::strand instance_strand;
+
   public:
     CpaCySymCipherDirection qcc_op_type;
 
-    QccCrypto() {};
+    QccCrypto(boost::asio::io_context& context): instance_strand(context) {};
     ~QccCrypto() {};
 
     bool init(const size_t chunk_size);
