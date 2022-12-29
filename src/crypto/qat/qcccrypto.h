@@ -16,6 +16,7 @@
 #include <memory>
 #include "common/ceph_mutex.h"
 #include <vector>
+#include <functional>
 extern "C" {
 #include "cpa.h"
 #include "cpa_cy_sym_dp.h"
@@ -40,13 +41,18 @@ class QccCrypto {
     // auto async_perform_op(ExecutionContext& ctx, int avail_inst, std::vector<CpaCySymDpOpData*>& pOpDataVec, CompletionToken&& token);
 
 
-    // used for get instance and put instance
+    // // used for get instance and put instance
     std::unique_ptr<Completion> completion;
 
-    // one completion per instance
-    std::vector<std::unique_ptr<Completion>> op_completions;
+    // // one completion per instance
+    // std::vector<std::unique_ptr<Completion>> op_completions;
 
     boost::asio::io_context::strand instance_strand;
+
+    std::queue<std::function<void()>> instance_completions;
+
+    // template <typename ExecutionContext, typename CompletionToken>
+    // auto async_get_instance(ExecutionContext& ctx, int& avail_inst, CompletionToken&& token);
 
   public:
     CpaCySymCipherDirection qcc_op_type;
@@ -200,6 +206,7 @@ class QccCrypto {
 class QatCrypto {
   boost::asio::io_context& context;
   yield_context yield;
+  QccCrypto *crypto;
   struct Handler;
   using Completion = ceph::async::Completion<void(boost::system::error_code)>;
 
@@ -221,8 +228,9 @@ class QatCrypto {
   }
 
   QatCrypto (boost::asio::io_context& context,
-             yield_context yield
-             ) : context(context), yield(yield) {}
+             yield_context yield,
+             QccCrypto *crypto
+             ) : context(context), yield(yield), crypto(crypto){}
   QatCrypto (const QatCrypto &qat) = delete;
   QatCrypto (QatCrypto &&qat) = delete;
   void operator=(const QatCrypto &qat) = delete;
@@ -230,6 +238,9 @@ class QatCrypto {
 
   template <typename CompletionToken>
   auto async_perform_op(int avail_inst, std::vector<CpaCySymDpOpData*>& pOpDataVec, CompletionToken&& token);
+
+  template <typename CompletionToken>
+  auto async_get_instance(int& avail_inst, CompletionToken&& token);
 
 };
 #endif //QCCCRYPTO_H

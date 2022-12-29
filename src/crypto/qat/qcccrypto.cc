@@ -74,10 +74,46 @@ static std::mutex qcc_eng_mutex;
 static std::condition_variable alloc_cv;
 static std::atomic<bool> init_called = { false };
 
+
+
+template <typename CompletionToken>
+auto QatCrypto::async_get_instance(int& avail_inst, CompletionToken&& token) {
+  using boost::asio::async_completion;
+  using Signature = void(boost::system::error_code);
+  async_completion<CompletionToken, Signature> init(token);
+  completion = Completion::create(context.get_executor(),
+                      std::move(init.completion_handler));
+  boost::asio::post(crypto->instance_strand, [this, &avail_inst]()mutable{
+    dout(1) << "async_get_instance" << dendl;
+    if (!crypto->open_instances.empty()) {
+      avail_inst = crypto->open_instances.front();
+      crypto->open_instances.pop();
+      ceph::async::post(std::move(completion), boost::system::error_code{});
+    } else {
+      crypto->instance_completions.push([this, &avail_inst]()mutable{
+        avail_inst = crypto->open_instances.front();
+        crypto->open_instances.pop();
+        ceph::async::post(std::move(completion), boost::system::error_code{});
+      });
+    }
+  });
+  return init.result.get();
+}
+
+
+
 void QccCrypto::QccFreeInstance(int entry) {
-  std::lock_guard<std::mutex> freeinst(qcc_alloc_mutex);
-  open_instances.push(entry);
-  alloc_cv.notify_one();
+  // std::lock_guard<std::mutex> freeinst(qcc_alloc_mutex);
+  // open_instances.push(entry);
+  // alloc_cv.notify_one();
+  boost::asio::post(instance_strand, [this, entry]()mutable{
+    open_instances.push(entry);
+    if (!instance_completions.empty()) {
+      dout(1) << "instance_completions is not empty" << dendl;
+      instance_completions.front()();
+      instance_completions.pop();
+    }
+  });
 }
 
 int QccCrypto::QccGetFreeInstance() {
@@ -175,7 +211,7 @@ bool QccCrypto::init(const size_t chunk_size) {
     return false;
   }
   dout(1) << "Get instances num: " << qcc_inst->num_instances << dendl;
-  op_completions.resize(qcc_inst->num_instances);
+  // op_completions.resize(qcc_inst->num_instances);
 
   int iter = 0;
   //Start Instances
@@ -315,9 +351,14 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
   }
   CpaStatus status = CPA_STATUS_SUCCESS;
   int avail_inst = -1;
-  avail_inst = QccGetFreeInstance();
+  // avail_inst = QccGetFreeInstance();
+  boost::system::error_code ec;
+  yield_context yield = y.get_yield_context();
+  // boost::asio::io_context& context = y.get_io_context();
+  QatCrypto helper(y.get_io_context(), yield, this);
+  helper.async_get_instance(avail_inst, yield[ec]);
 
-  dout(10) << "Using dp_batch inst " << avail_inst << dendl;
+  dout(1) << "Using dp_batch inst " << avail_inst << dendl;
 
 
   auto sg = make_scope_guard([this, avail_inst] {
@@ -478,7 +519,7 @@ bool QccCrypto::symPerformOp(int avail_inst,
   Cpa32U iv_index = 0;
   for (Cpa32U off = 0; off < size; off += one_batch_size) {
     CompletionHandle complete;
-    QatCrypto helper(y.get_io_context(), y.get_yield_context());
+    QatCrypto helper(y.get_io_context(), y.get_yield_context(), this);
     std::vector<CpaCySymDpOpData*> pOpDataVec;
     for (Cpa32U offset = off, i = 0; offset < size && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
       CpaCySymDpOpData *pOpData = qcc_op_mem[avail_inst].sym_op_data[i];
