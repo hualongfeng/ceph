@@ -62,7 +62,8 @@ static void symDpCallback(CpaCySymDpOpData *pOpData,
     // complete->complete();
     // dout(1) << "symDpCallback: " << pOpData->pCallbackTag << dendl;
     if (static_cast<QatCrypto*>(pOpData->pCallbackTag)->complete()) {
-      dout(1) << "symDpCallback post" << dendl;
+      dout(1) << "symDpCallback post: " << pOpData->pCallbackTag << dendl;
+      ceph_assert(static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion);
       ceph::async::post(std::move(static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion),
       boost::system::error_code{});
     }
