@@ -63,9 +63,10 @@ static void symDpCallback(CpaCySymDpOpData *pOpData,
     // dout(1) << "symDpCallback: " << pOpData->pCallbackTag << dendl;
     if (static_cast<QatCrypto*>(pOpData->pCallbackTag)->complete()) {
       dout(1) << "symDpCallback post: " << pOpData->pCallbackTag << dendl;
-      ceph_assert(static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion);
-      ceph::async::post(std::move(static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion),
-      boost::system::error_code{});
+      // ceph_assert(static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion);
+      // ceph::async::post(std::move(static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion),
+      // boost::system::error_code{});
+      static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion_handler(boost::system::error_code{});
     }
   }
 }
@@ -491,9 +492,12 @@ auto QatCrypto::async_perform_op(int avail_inst, std::vector<CpaCySymDpOpData*>&
   using boost::asio::async_completion;
   using Signature = void(boost::system::error_code);
   async_completion<CompletionToken, Signature> init(token);
-  completion = Completion::create(context.get_executor(),
-                      std::move(init.completion_handler));
-  // op_completions[avail_inst] = std::move(completion);
+  completion_handler = [handler = std::move(init.completion_handler)](boost::system::error_code ec){
+    boost::asio::asio_handler_invoke(std::bind(handler, ec), &handler);
+  };
+  // completion = Completion::create(context.get_executor(),
+  //                     std::move(init.completion_handler));
+
   do {
     status = cpaCySymDpEnqueueOpBatch(pOpDataVec.size(), &pOpDataVec[0], CPA_TRUE);
   } while (status == CPA_STATUS_RETRY);
@@ -501,8 +505,10 @@ auto QatCrypto::async_perform_op(int avail_inst, std::vector<CpaCySymDpOpData*>&
   dout(1) << "async_perform_op: " << status << "=?" << CPA_STATUS_SUCCESS << dendl;
 
   if (status != CPA_STATUS_SUCCESS) {
+    dout(1) << "async_perform_op error" << dendl;
     auto ec = boost::system::error_code{status, boost::system::system_category()};
-    ceph::async::dispatch(std::move(completion), ec);
+    // ceph::async::dispatch(std::move(completion), ec);
+    completion_handler(ec);
   }
   return init.result.get();
 }

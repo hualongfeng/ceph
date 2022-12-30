@@ -212,6 +212,7 @@ class QatCrypto {
 
  public:
   std::unique_ptr<Completion> completion;
+  std::function<void(boost::system::error_code)> completion_handler;
   std::atomic<std::size_t> count;
   std::mutex mutex;
   bool complete() {
