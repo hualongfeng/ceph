@@ -56,7 +56,7 @@ class QccCrypto {
     std::unique_ptr<work_guard_type> work_guard;
 
 
-    std::queue<std::function<void()>> instance_completions;
+    std::queue<std::function<void(int)>> instance_completions;
 
     // template <typename ExecutionContext, typename CompletionToken>
     // auto async_get_instance(ExecutionContext& ctx, int& avail_inst, CompletionToken&& token);
@@ -248,7 +248,7 @@ class QatCrypto {
   auto async_perform_op(int avail_inst, std::vector<CpaCySymDpOpData*>& pOpDataVec, CompletionToken&& token);
 
   template <typename CompletionToken>
-  auto async_get_instance(int& avail_inst, CompletionToken&& token);
+  auto async_get_instance(CompletionToken&& token);
 
 };
 #endif //QCCCRYPTO_H

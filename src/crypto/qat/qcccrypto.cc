@@ -79,28 +79,26 @@ static std::atomic<bool> init_called = { false };
 
 
 template <typename CompletionToken>
-auto QatCrypto::async_get_instance(int& avail_inst, CompletionToken&& token) {
+auto QatCrypto::async_get_instance(CompletionToken&& token) {
   using boost::asio::async_completion;
-  using Signature = void(boost::system::error_code);
+  using Signature = void(int);
   async_completion<CompletionToken, Signature> init(token);
   // completion = Completion::create(context.get_executor(),
   //                     std::move(init.completion_handler));
   // boost::asio::post(crypto->instance_strand, [this, &avail_inst]()mutable{
-  boost::asio::post(crypto->my_context, [this, &avail_inst, handler = std::move(init.completion_handler)]()mutable{
+  boost::asio::post(crypto->my_context, [this, handler = std::move(init.completion_handler)]()mutable{
     auto handler1 = std::move(handler);
     dout(1) << "async_get_instance" << dendl;
     if (!crypto->open_instances.empty()) {
-      avail_inst = crypto->open_instances.front();
+      int avail_inst = crypto->open_instances.front();
       crypto->open_instances.pop();
       // ceph::async::post(std::move(completion), boost::system::error_code{});
       using boost::asio::asio_handler_invoke;
-      asio_handler_invoke(std::bind(handler1, boost::system::error_code{}), &handler1);
+      asio_handler_invoke(std::bind(handler1, avail_inst), &handler1);
     } else {
-      crypto->instance_completions.push([this, &avail_inst, handler2 = std::move(handler1)]()mutable{
-        avail_inst = crypto->open_instances.front();
-        crypto->open_instances.pop();
+      crypto->instance_completions.push([this, handler2 = std::move(handler1)](int inst)mutable{
         using boost::asio::asio_handler_invoke;
-        asio_handler_invoke(std::bind(handler2, boost::system::error_code{}), &handler2);
+        asio_handler_invoke(std::bind(handler2, inst), &handler2);
         // ceph::async::post(std::move(completion), boost::system::error_code{});
       });
     }
@@ -115,11 +113,12 @@ void QccCrypto::QccFreeInstance(int entry) {
   // open_instances.push(entry);
   // alloc_cv.notify_one();
   boost::asio::post(my_context, [this, entry]()mutable{
-    open_instances.push(entry);
     if (!instance_completions.empty()) {
       dout(1) << "instance_completions is not empty: " << instance_completions.size() << dendl;
-      instance_completions.front()();
+      instance_completions.front()(entry);
       instance_completions.pop();
+    } else {
+      open_instances.push(entry);
     }
   });
 }
@@ -373,11 +372,11 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
   CpaStatus status = CPA_STATUS_SUCCESS;
   int avail_inst = -1;
   // avail_inst = QccGetFreeInstance();
-  boost::system::error_code ec;
+
   yield_context yield = y.get_yield_context();
-  // boost::asio::io_context& context = y.get_io_context();
-  QatCrypto helper(y.get_io_context(), yield, this);
-  helper.async_get_instance(avail_inst, yield[ec]);
+  boost::asio::io_context& context = y.get_io_context();
+  QatCrypto helper(context, yield, this);
+  avail_inst = helper.async_get_instance(yield);
 
   dout(1) << "Using dp_batch inst " << avail_inst << dendl;
 
