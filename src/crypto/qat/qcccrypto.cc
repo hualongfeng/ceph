@@ -83,19 +83,25 @@ auto QatCrypto::async_get_instance(int& avail_inst, CompletionToken&& token) {
   using boost::asio::async_completion;
   using Signature = void(boost::system::error_code);
   async_completion<CompletionToken, Signature> init(token);
-  completion = Completion::create(context.get_executor(),
-                      std::move(init.completion_handler));
-  boost::asio::post(crypto->instance_strand, [this, &avail_inst]()mutable{
+  // completion = Completion::create(context.get_executor(),
+  //                     std::move(init.completion_handler));
+  // boost::asio::post(crypto->instance_strand, [this, &avail_inst]()mutable{
+  boost::asio::post(crypto->my_context, [this, &avail_inst, handler = std::move(init.completion_handler)]()mutable{
+    auto handler1 = std::move(handler);
     dout(1) << "async_get_instance" << dendl;
     if (!crypto->open_instances.empty()) {
       avail_inst = crypto->open_instances.front();
       crypto->open_instances.pop();
-      ceph::async::post(std::move(completion), boost::system::error_code{});
+      // ceph::async::post(std::move(completion), boost::system::error_code{});
+      using boost::asio::asio_handler_invoke;
+      asio_handler_invoke(std::bind(handler1, boost::system::error_code{}), &handler1);
     } else {
-      crypto->instance_completions.push([this, &avail_inst]()mutable{
+      crypto->instance_completions.push([this, &avail_inst, handler2 = std::move(handler1)]()mutable{
         avail_inst = crypto->open_instances.front();
         crypto->open_instances.pop();
-        ceph::async::post(std::move(completion), boost::system::error_code{});
+        using boost::asio::asio_handler_invoke;
+        asio_handler_invoke(std::bind(handler2, boost::system::error_code{}), &handler2);
+        // ceph::async::post(std::move(completion), boost::system::error_code{});
       });
     }
   });
@@ -108,10 +114,10 @@ void QccCrypto::QccFreeInstance(int entry) {
   // std::lock_guard<std::mutex> freeinst(qcc_alloc_mutex);
   // open_instances.push(entry);
   // alloc_cv.notify_one();
-  boost::asio::post(instance_strand, [this, entry]()mutable{
+  boost::asio::post(my_context, [this, entry]()mutable{
     open_instances.push(entry);
     if (!instance_completions.empty()) {
-      dout(1) << "instance_completions is not empty" << dendl;
+      dout(1) << "instance_completions is not empty: " << instance_completions.size() << dendl;
       instance_completions.front()();
       instance_completions.pop();
     }
@@ -272,9 +278,18 @@ bool QccCrypto::init(const size_t chunk_size) {
   }
 
   qat_poll_thread = make_named_thread("qat_poll", &QccCrypto::poll_instances, this);
+  
+  work_guard = std::make_unique<work_guard_type>(my_context.get_executor());
+  qat_context_thread = make_named_thread("qat_context", &QccCrypto::my_context_run, this);
   is_init = true;
   dout(10) << "Init complete" << dendl;
   return true;
+}
+
+void QccCrypto::my_context_run() {
+  dout(1) << "my_context_run" << dendl;
+  my_context.run();
+  dout(1) << "my_context_run stop" << dendl;
 }
 
 bool QccCrypto::destroy() {
@@ -292,6 +307,10 @@ bool QccCrypto::destroy() {
   thread_stop = true;
   if (qat_poll_thread.joinable()) {
     qat_poll_thread.join();
+  }
+  my_context.stop();
+  if (qat_context_thread.joinable()) {
+    qat_context_thread.join();
   }
 
   dout(10) << "Destroying QAT crypto & related memory" << dendl;
@@ -492,23 +511,33 @@ auto QatCrypto::async_perform_op(int avail_inst, std::vector<CpaCySymDpOpData*>&
   using boost::asio::async_completion;
   using Signature = void(boost::system::error_code);
   async_completion<CompletionToken, Signature> init(token);
-  completion_handler = [handler = std::move(init.completion_handler)](boost::system::error_code ec){
-    boost::asio::asio_handler_invoke(std::bind(handler, ec), &handler);
+  // completion_handler = [handler = std::move(init.completion_handler)](boost::system::error_code ec){
+  completion_handler = [this, handler = init.completion_handler](boost::system::error_code ec){
+    // boost::asio::post(crypto->my_context, [handler, ec]() {
+    // boost::asio::post(context, [handler, ec]() {
+    //   using boost::asio::asio_handler_invoke;
+    //   asio_handler_invoke(std::bind(handler, ec), &handler);      
+    // });
+    using boost::asio::asio_handler_invoke;
+    asio_handler_invoke(std::bind(handler, ec), &handler);
   };
   // completion = Completion::create(context.get_executor(),
   //                     std::move(init.completion_handler));
 
-  do {
+  // do {
     status = cpaCySymDpEnqueueOpBatch(pOpDataVec.size(), &pOpDataVec[0], CPA_TRUE);
-  } while (status == CPA_STATUS_RETRY);
+  // } while (status == CPA_STATUS_RETRY);
 
-  dout(1) << "async_perform_op: " << status << "=?" << CPA_STATUS_SUCCESS << dendl;
+  // dout(1) << "async_perform_op: " << status << "=?" << CPA_STATUS_SUCCESS << dendl;
 
   if (status != CPA_STATUS_SUCCESS) {
     dout(1) << "async_perform_op error" << dendl;
     auto ec = boost::system::error_code{status, boost::system::system_category()};
     // ceph::async::dispatch(std::move(completion), ec);
-    completion_handler(ec);
+
+    boost::asio::dispatch(context, [this, &ec](){
+      completion_handler(ec);
+    });
   }
   return init.result.get();
 }
@@ -583,7 +612,11 @@ bool QccCrypto::symPerformOp(int avail_inst,
 
     //pOpDataVec.back()->pCallbackTag = &helper;
     // dout(1) << "async_perform_op: " << pOpDataVec.back()->pCallbackTag << dendl;
-    helper.async_perform_op(avail_inst, pOpDataVec, yield[ec]);
+    ceph_assert(!helper.completion_handler);
+
+    do {
+      helper.async_perform_op(avail_inst, pOpDataVec, yield[ec]);
+    } while (!ec && ec.value() == CPA_STATUS_RETRY);
     dout(1) << "end async_perform_op: " << pOpDataVec.back()->pCallbackTag << dendl;
     // dout(1) << "async_perform_op: " << status << "=?" << CPA_STATUS_SUCCESS << dendl;
     if (likely(CPA_STATUS_SUCCESS == status)) {

@@ -48,6 +48,13 @@ class QccCrypto {
     // std::vector<std::unique_ptr<Completion>> op_completions;
 
     boost::asio::io_context::strand instance_strand;
+    boost::asio::io_context my_context;
+    boost::asio::io_context::strand instance_strand1;
+    std::thread qat_context_thread;
+    void my_context_run();
+    using work_guard_type = boost::asio::executor_work_guard<boost::asio::io_context::executor_type>;
+    std::unique_ptr<work_guard_type> work_guard;
+
 
     std::queue<std::function<void()>> instance_completions;
 
@@ -57,7 +64,7 @@ class QccCrypto {
   public:
     CpaCySymCipherDirection qcc_op_type;
 
-    QccCrypto(boost::asio::io_context& context): instance_strand(context) {};
+    QccCrypto(boost::asio::io_context& context): instance_strand(context), instance_strand1(my_context) {};
     ~QccCrypto() {};
 
     bool init(const size_t chunk_size);
