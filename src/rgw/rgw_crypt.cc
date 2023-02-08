@@ -463,11 +463,11 @@ public:
       for (size_t offset = 0, i = 0; offset < size; offset += CHUNK_SIZE, i++) {
         prepare_iv(iv[i], stream_offset + offset);
       }
-        if (encrypt) {
-          result = crypto_accel->cbc_encrypt_batch(out, in, size, iv, key, y);
-        } else {
-          result = crypto_accel->cbc_decrypt_batch(out, in, size, iv, key, y);
-        }
+      if (encrypt) {
+        result = crypto_accel->cbc_encrypt_batch(out, in, size, iv, key, y);
+      } else {
+        result = crypto_accel->cbc_decrypt_batch(out, in, size, iv, key, y);
+      }
       delete[] iv;
     } else {
       unsigned char iv[AES_256_IVSIZE];

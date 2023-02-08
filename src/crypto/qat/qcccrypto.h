@@ -47,7 +47,8 @@ class QccCrypto {
     // // one completion per instance
     // std::vector<std::unique_ptr<Completion>> op_completions;
 
-    boost::asio::io_context::strand instance_strand;
+    boost::asio::io_context::strand instance_strand_get;
+    boost::asio::io_context::strand instance_strand_free;
     boost::asio::io_context my_context;
     boost::asio::io_context::strand instance_strand1;
     std::thread qat_context_thread;
@@ -64,7 +65,7 @@ class QccCrypto {
   public:
     CpaCySymCipherDirection qcc_op_type;
 
-    QccCrypto(boost::asio::io_context& context): instance_strand(context), instance_strand1(my_context) {};
+    QccCrypto(boost::asio::io_context& context): instance_strand_get(context), instance_strand_free(context), instance_strand1(my_context) {};
     ~QccCrypto() {};
 
     bool init(const size_t chunk_size);
@@ -127,6 +128,7 @@ class QccCrypto {
      * Handle queue with free instances to handle op
      */
     std::queue<int> open_instances;
+    std::atomic<size_t> inst_cnt{0};
     int QccGetFreeInstance();
     void QccFreeInstance(int entry);
     std::thread qat_poll_thread;
@@ -216,9 +218,11 @@ class QatCrypto {
   QccCrypto *crypto;
   struct Handler;
   using Completion = ceph::async::Completion<void(boost::system::error_code)>;
+  using CompletionInt = ceph::async::Completion<void(int)>;
 
  public:
   std::unique_ptr<Completion> completion;
+  std::unique_ptr<CompletionInt> completion_int;
   std::function<void(boost::system::error_code)> completion_handler;
   std::atomic<std::size_t> count;
   std::mutex mutex;
