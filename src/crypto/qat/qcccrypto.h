@@ -30,42 +30,24 @@ extern "C" {
 }
 
 class QccCrypto {
-  friend class QatCrypto;
-  size_t chunk_size;
+    friend class QatCrypto;
+    size_t chunk_size;
 
-      using Completion = ceph::async::Completion<void(boost::system::error_code)>;
-
-    // template <typename CompletionToken>
-    // auto async_perform_op(CompletionToken&& token);
-    // template <typename ExecutionContext, typename CompletionToken>
-    // auto async_perform_op(ExecutionContext& ctx, int avail_inst, std::vector<CpaCySymDpOpData*>& pOpDataVec, CompletionToken&& token);
-
-
-    // // used for get instance and put instance
-    std::unique_ptr<Completion> completion;
-
-    // // one completion per instance
-    // std::vector<std::unique_ptr<Completion>> op_completions;
-
-    boost::asio::io_context::strand instance_strand_get;
-    boost::asio::io_context::strand instance_strand_free;
     boost::asio::io_context my_context;
-    boost::asio::io_context::strand instance_strand1;
     std::thread qat_context_thread;
     void my_context_run();
     using work_guard_type = boost::asio::executor_work_guard<boost::asio::io_context::executor_type>;
     std::unique_ptr<work_guard_type> work_guard;
 
-
     std::queue<std::function<void(int)>> instance_completions;
 
-    // template <typename ExecutionContext, typename CompletionToken>
-    // auto async_get_instance(ExecutionContext& ctx, int& avail_inst, CompletionToken&& token);
+    template <typename CompletionToken>
+    auto async_get_instance(CompletionToken&& token);
 
   public:
     CpaCySymCipherDirection qcc_op_type;
 
-    QccCrypto(boost::asio::io_context& context): instance_strand_get(context), instance_strand_free(context), instance_strand1(my_context) {};
+    QccCrypto(boost::asio::io_context& context)  {};
     ~QccCrypto() {};
 
     bool init(const size_t chunk_size);
@@ -77,7 +59,6 @@ class QccCrypto {
                           optional_yield y);
 
   private:
-
     // Currently only supporting AES_256_CBC.
     // To-Do: Needs to be expanded
     static const size_t AES_256_IV_LEN = 16;
@@ -128,8 +109,6 @@ class QccCrypto {
      * Handle queue with free instances to handle op
      */
     std::queue<int> open_instances;
-    std::atomic<size_t> inst_cnt{0};
-    int QccGetFreeInstance();
     void QccFreeInstance(int entry);
     std::thread qat_poll_thread;
     bool thread_stop{false};
@@ -216,22 +195,14 @@ class QatCrypto {
   boost::asio::io_context& context;
   yield_context yield;
   QccCrypto *crypto;
-  struct Handler;
-  using Completion = ceph::async::Completion<void(boost::system::error_code)>;
-  using CompletionInt = ceph::async::Completion<void(int)>;
 
  public:
-  std::unique_ptr<Completion> completion;
-  std::unique_ptr<CompletionInt> completion_int;
   std::function<void(boost::system::error_code)> completion_handler;
   std::atomic<std::size_t> count;
   std::mutex mutex;
   bool complete() {
     std::scoped_lock lock{mutex};
     count--;
-    // if (count == 0) {
-    //   cv.notify_one();
-    // }
     return (count == 0);
   }
 
@@ -250,9 +221,5 @@ class QatCrypto {
 
   template <typename CompletionToken>
   auto async_perform_op(int avail_inst, std::vector<CpaCySymDpOpData*>& pOpDataVec, CompletionToken&& token);
-
-  template <typename CompletionToken>
-  auto async_get_instance(CompletionToken&& token);
-
 };
 #endif //QCCCRYPTO_H
