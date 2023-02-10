@@ -539,3 +539,226 @@ bool QccCrypto::symPerformOp(int avail_inst,
   }
   return (status == CPA_STATUS_SUCCESS);
 }
+
+
+  class QatCipher {
+   private:
+    CpaInstanceHandle cyInstHandle{nullptr};
+    CpaCySymSessionCtx sessionCtx{nullptr};
+    CpaBufferList *pBufferList{nullptr};
+   protected:
+    CpaCySymSessionSetupData* sessionSetupData;
+   public:
+    QatCipher (CpaInstanceHandle cyInstHandle, const CpaCySymCipherDirection op_type, Cpa8U *key);
+    QatCipher (const QatCipher &qat) = delete;
+    QatCipher (QatCipher &&qat) = delete;
+    ~QatCipher ();
+    void Restart();
+    void Final(unsigned char* out, const unsigned char* in, size_t size, Cpa8U *iv);
+  };
+
+
+QatCipher::QatCipher(CpaInstanceHandle cyInstHandle, const CpaCySymCipherDirection op_type, Cpa8U *key)
+  : cyInstHandle(cyInstHandle) {
+  sessionSetupData = new CpaCySymSessionSetupData;
+  memset(sessionSetupData, 0, sizeof(CpaCySymSessionSetupData));
+  sessionSetupData->sessionPriority = CPA_CY_PRIORITY_NORMAL;
+  sessionSetupData->symOperation = CPA_CY_SYM_OP_CIPHER;
+  sessionSetupData->cipherSetupData.chiperAlgorithm = CPA_CY_SYM_CIPHER_AES_CBC;
+  sessionSetupData->cipherSetupData.cipherKeyLenInBytes = 32;
+  sessionSetupData->cipherSetupData.cipherDirection = op_type;
+  sessionSetupData->cipherSetupData.pCipherKey = key;
+}
+
+
+struct CpaBufferListDeleter {
+  void operator() (CpaBufferList* pBufferList) {
+    void *pBufferMeta = nullptr;
+    void *pSrcBuffer = nullptr;
+    void *pDigestBuffer = nullptr;
+
+    if (pBufferList != nullptr) {
+      pBufferMeta   = pBufferList->pPrivateMetaData;
+      pIvBuffer = pBufferList->pUserData;
+      pSrcBuffer    = pBufferList->pBuffers->pData;
+      qcc_contig_mem_free(&pSrcBuffer);
+      free(pBufferList);
+      qcc_contig_mem_free(&pBufferMeta);
+      qcc_contig_mem_free((void**)&pIvBuffer);
+    }
+  }
+};
+
+using buffer_ptr = std::unique_ptr<CpaBufferList, CpaBufferListDeleter>;
+static std::vector<buffer_ptr> buffers;
+static std::mutex mutex;
+
+QatCipher::~QatCipher() {
+  if (pBufferList != nullptr) {
+    std::scoped_lock lock{mutex};
+    buffers.emplace_back(pBufferList);
+  }
+
+  if (sessionCtx != nullptr) {
+    CpaBoolean sessionInUse = CPA_FALSE;
+    do {
+      cpaCySymSessionInUse(sessionCtx, &sessionInUse);
+    } while (sessionInUse);
+
+    cpaCySymRemoveSession(cyInstHandle, sessionCtx);
+    qcc_contig_mem_free((void**)&sessionCtx);
+  }
+
+  delete sessionSetupData;
+}
+
+void QatCipher::Restart() {
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  Cpa32U sessionCtxSize;
+  if (sessionCtx == nullptr) {
+    // first need to alloc session memory
+    status = cpaCySymSessionCtxGetSize(cyInstHandle, sessionSetupData, &sessionCtxSize);
+    if (status != CPA_STATUS_SUCCESS) {
+      std::cout <<  "cpaCySymSessionCtxGetSize failed, stat = " << status << std::endl;
+      throw "cpaCySymSessionCtxGetSize failed";
+    }
+    status = qcc_contig_mem_alloc((void**)&sessionCtx, sessionCtxSize);
+    if (status != CPA_STATUS_SUCCESS) {
+      std::cout << "Failed to alloc contiguous memory for SessionCtx, stat = " << status << std::endl;
+      throw "Failed to alloc contiguous memory for SessionCtx";
+    }
+  }
+
+  status = cpaCySymInitSession(cyInstHandle, symCallback, sessionSetupData, sessionCtx);
+  if (status != CPA_STATUS_SUCCESS) {
+    std::cout << "cpaCySymInitSession failed, stat = " << status << std::endl;;
+    throw "cpaCySymInitSession failed";
+  }
+}
+
+/*******************************************************************************************
+ **   -----------------|---------------------------|
+ **                    |-------numBuffers----------|
+ **    CpaBufferList   |-------pBuffers------------|-----
+ **                    |-------pUserData-----------|    |
+ **                    |-------pPrivateMetaData----|    |
+ **   -----------------|---------------------------|<----
+ **                    |-------dataLenInByte-------|      -----------------------------
+ **    CpaFlatBuffer   |-------pData---------------|---->|contiguous memory| pSrcBuffer
+ **   -----------------|---------------------------|      -----------------------------
+*********************************************************************************************/
+static CpaBufferList* getCpaBufferList(CpaInstanceHandle cyInstHandle) {
+
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  Cpa8U *pBufferMeta = nullptr;
+  Cpa32U bufferMetaSize = 0;
+  CpaBufferList *pBufferList = nullptr;
+  CpaFlatBuffer *pFlatBuffer = nullptr;
+  Cpa32U bufferSize = 4096;
+  Cpa32U numBuffers = 1;
+  Cpa32U bufferListMemSize = sizeof(CpaBufferList) + (numBuffers * sizeof(CpaFlatBuffer));
+  Cpa8U *pSrcBuffer = nullptr;
+  Cpa8U *pIvBuffer = nullptr;
+
+  {
+    std::scoped_lock lock{mutex};
+    if (!buffers.empty()) {
+      pBufferList = buffers.back().release();
+      buffers.pop_back();
+      return pBufferList;
+    }
+  }
+
+  status = cpaCyBufferListGetMetaSize(cyInstHandle, numBuffers, &bufferMetaSize);
+
+  if (CPA_STATUS_SUCCESS == status)
+  {
+    status = qcc_contig_mem_alloc((void**)&pBufferMeta, bufferMetaSize);
+  }
+
+  if (CPA_STATUS_SUCCESS == status)
+  {
+    pBufferList = (CpaBufferList *)malloc(bufferListMemSize);
+    if (pBufferList == nullptr) return nullptr;
+  }
+
+  if (CPA_STATUS_SUCCESS == status)
+  {
+    status = qcc_contig_mem_alloc((void**)&pSrcBuffer, bufferSize);
+  }
+
+  if (CPA_STATUS_SUCCESS == status)
+  {
+    status = qcc_contig_mem_alloc((void**)&pIvBuffer, 16);
+  }
+
+  if (CPA_STATUS_SUCCESS == status)
+  {
+    /* increment by sizeof(CpaBufferList) to get at the
+     * array of flatbuffers */
+    pFlatBuffer = (CpaFlatBuffer *)(pBufferList + 1);
+
+    pBufferList->numBuffers = 1;
+    pBufferList->pBuffers = pFlatBuffer;
+    pBufferList->pUserData = pIvBuffer;
+    pBufferList->pPrivateMetaData = pBufferMeta;
+
+    pFlatBuffer->dataLenInBytes = bufferSize;
+    pFlatBuffer->pData = pSrcBuffer;
+  }
+
+  return pBufferList;
+}
+
+void QatCipher::Final(unsigned char* out, const unsigned char* in, size_t size, Cpa8U *iv) {
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  if (pBufferList == nullptr) {
+    pBufferList = getCpaBufferList(cyInstHandle);
+
+    if (pBufferList == nullptr) {
+      std::cout << "cannot get CpaBufferList" << std::endl;
+      return;
+    }
+  }
+
+  memcpy(pBufferList->pBuffers->pData, in, size);
+  memcpy(pBufferList->pUserData, iv, 16);
+
+  CpaCySymOpData pOpData = {0};
+
+  struct COMPLETION_STRUCT complete;
+
+  COMPLETION_INIT((&complete));
+
+  pBufferList->pBuffers->dataLenInBytes = size;
+
+  pOpData.sessionCtx = sessionCtx;
+  pOpData.packetType = CPA_CY_SYM_PACKET_TYPE_FULL;
+  pOpData.pIv = (Cpa8U *)pBufferList->pUserData;
+  pOpData.ivLenInBytes = 16;
+  pOpData.cryptoStartSrcOffsetInBytes = 0;
+  pOpData.messageLenToCipherInBytes = pBufferList->pBuffers->dataLenInBytes;
+
+  do {
+    status = cpaCySymPerformOp(
+      cyInstHandle,
+      (void *)&complete,
+      &pOpData,
+      pBufferList,
+      pBufferList,
+      NULL);
+
+  } while (status == CPA_STATUS_RETRY);
+  if (CPA_STATUS_SUCCESS != status) {
+    std::cout << "Final cpaCySymPerformOp failed. (status = " << status << std::endl;
+  }
+
+  if (CPA_STATUS_SUCCESS == status) {
+    if (!COMPLETION_WAIT((&complete), 30)) {
+      std::cout << "timeout or interruption in cpaCySymPerformOp" << std::endl;
+    }
+  }
+  COMPLETION_DESTROY(&complete);
+
+  memcpy(out, pBufferList->pBuffers->pData, size);
+}
