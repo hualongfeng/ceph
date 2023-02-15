@@ -542,6 +542,8 @@ bool QccCrypto::symPerformOp(int avail_inst,
 
 
   class QatCipher {
+    boost::asio::io_context& context;
+    yield_context yield;
    private:
     CpaInstanceHandle cyInstHandle{nullptr};
     CpaCySymSessionCtx sessionCtx{nullptr};
@@ -549,7 +551,12 @@ bool QccCrypto::symPerformOp(int avail_inst,
    protected:
     CpaCySymSessionSetupData* sessionSetupData;
    public:
-    QatCipher (CpaInstanceHandle cyInstHandle, const CpaCySymCipherDirection op_type, Cpa8U *key);
+    template <typename CompletionToken>
+    auto async_perform_op(CompletionToken&& token, CpaCySymOpData& pOpData);
+    std::function<void(boost::system::error_code)> completion_handler;
+
+    QatCipher (CpaInstanceHandle cyInstHandle, const CpaCySymCipherDirection op_type, Cpa8U *key,
+               boost::asio::io_context& context, yield_context yield);
     QatCipher (const QatCipher &qat) = delete;
     QatCipher (QatCipher &&qat) = delete;
     ~QatCipher ();
@@ -557,9 +564,43 @@ bool QccCrypto::symPerformOp(int avail_inst,
     void Final(unsigned char* out, const unsigned char* in, size_t size, Cpa8U *iv);
   };
 
+template <typename CompletionToken>
+auto QatCipher::async_perform_op(CompletionToken&& token, CpaCySymOpData& pOpData)
+{
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  using boost::asio::async_completion;
+  using Signature = void(boost::system::error_code);
+  async_completion<CompletionToken, Signature> init(token);
+  // completion = Completion::create(context.get_executor(),
+  //                     std::move(init.completion_handler));
+  
+  auto ex = boost::asio::get_associated_executor(init.completion_handler);
+  completion_handler = [this, ex, handler = init.completion_handler](boost::system::error_code ec){
+    boost::asio::post(ex, std::bind(handler, ec));
+  };
 
-QatCipher::QatCipher(CpaInstanceHandle cyInstHandle, const CpaCySymCipherDirection op_type, Cpa8U *key)
-  : cyInstHandle(cyInstHandle) {
+  status = cpaCySymPerformOp(
+    cyInstHandle,
+    (void *)this,
+    &pOpData,
+    pBufferList,
+    pBufferList,
+    NULL);
+
+  if (status != CPA_STATUS_SUCCESS) {
+    auto ec = boost::system::error_code{status, boost::system::system_category()};
+
+    boost::asio::dispatch(context, [this, &ec](){
+      completion_handler(ec);
+    });
+  }
+
+  return init.result.get();
+}
+
+QatCipher::QatCipher(CpaInstanceHandle cyInstHandle, const CpaCySymCipherDirection op_type, Cpa8U *key,
+                     boost::asio::io_context& context, yield_context yield)
+  : cyInstHandle(cyInstHandle), context(context), yield(yield) {
   sessionSetupData = new CpaCySymSessionSetupData;
   memset(sessionSetupData, 0, sizeof(CpaCySymSessionSetupData));
   sessionSetupData->sessionPriority = CPA_CY_PRIORITY_NORMAL;
@@ -629,7 +670,7 @@ void QatCipher::Restart() {
     }
   }
 
-  status = cpaCySymInitSession(cyInstHandle, symCallback, sessionSetupData, sessionCtx);
+  // status = cpaCySymInitSession(cyInstHandle, symCallback, sessionSetupData, sessionCtx);
   if (status != CPA_STATUS_SUCCESS) {
     std::cout << "cpaCySymInitSession failed, stat = " << status << std::endl;;
     throw "cpaCySymInitSession failed";
@@ -739,26 +780,31 @@ void QatCipher::Final(unsigned char* out, const unsigned char* in, size_t size, 
   pOpData.cryptoStartSrcOffsetInBytes = 0;
   pOpData.messageLenToCipherInBytes = pBufferList->pBuffers->dataLenInBytes;
 
-  do {
-    status = cpaCySymPerformOp(
-      cyInstHandle,
-      (void *)&complete,
-      &pOpData,
-      pBufferList,
-      pBufferList,
-      NULL);
+  // do {
+  //   status = cpaCySymPerformOp(
+  //     cyInstHandle,
+  //     (void *)&complete,
+  //     &pOpData,
+  //     pBufferList,
+  //     pBufferList,
+  //     NULL);
 
-  } while (status == CPA_STATUS_RETRY);
+  ceph_assert(!completion_handler);
+  boost::system::error_code ec;
+  do {
+    async_perform_op(yield[ec], pOpData);
+  } while (!ec && ec.value() == CPA_STATUS_RETRY);
+
   if (CPA_STATUS_SUCCESS != status) {
     std::cout << "Final cpaCySymPerformOp failed. (status = " << status << std::endl;
   }
 
-  if (CPA_STATUS_SUCCESS == status) {
-    if (!COMPLETION_WAIT((&complete), 30)) {
-      std::cout << "timeout or interruption in cpaCySymPerformOp" << std::endl;
-    }
-  }
-  COMPLETION_DESTROY(&complete);
+  // if (CPA_STATUS_SUCCESS == status) {
+  //   if (!COMPLETION_WAIT((&complete), 30)) {
+  //     std::cout << "timeout or interruption in cpaCySymPerformOp" << std::endl;
+  //   }
+  // }
+  // COMPLETION_DESTROY(&complete);
 
   memcpy(out, pBufferList->pBuffers->pData, size);
 }
