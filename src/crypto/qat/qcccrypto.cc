@@ -21,27 +21,109 @@ static std::ostream& _prefix(std::ostream* _dout)
   return *_dout << "QccCrypto: ";
 }
 // -----------------------------------------------------------------------------
+  class QatCipher {
+   private:
+    CpaInstanceHandle cyInstHandle{nullptr};
+    CpaCySymSessionCtx sessionCtx{nullptr};
+    CpaBufferList *pBufferList{nullptr};
+    boost::asio::io_context& context;
+    yield_context yield;
+   protected:
+    CpaCySymSessionSetupData* sessionSetupData;
+   public:
+    template <typename CompletionToken>
+    auto async_perform_op(CompletionToken&& token, CpaCySymOpData& pOpData);
+    std::function<void(boost::system::error_code)> completion_handler;
+
+    QatCipher (CpaInstanceHandle cyInstHandle, const CpaCySymCipherDirection op_type, Cpa8U *key,
+               boost::asio::io_context& context, yield_context yield);
+    QatCipher (const QatCipher &qat) = delete;
+    QatCipher (QatCipher &&qat) = delete;
+    ~QatCipher ();
+    void Restart();
+    void Final(unsigned char* out, const unsigned char* in, size_t size, Cpa8U *iv);
+    static inline void qcc_contig_mem_free(void **ptr) {
+      if (*ptr) {
+        qaeMemFreeNUMA(ptr);
+        *ptr = NULL;
+      }
+    }
+
+    static inline CpaStatus qcc_contig_mem_alloc(void **ptr, Cpa32U size, Cpa32U alignment = 1) {
+      *ptr = qaeMemAllocNUMA(size, 0, alignment);
+      if (NULL == *ptr)
+      {
+        return CPA_STATUS_RESOURCE;
+      }
+      return CPA_STATUS_SUCCESS;
+    }
+  };
+
+template <typename CompletionToken>
+auto QatCipher::async_perform_op(CompletionToken&& token, CpaCySymOpData& pOpData)
+{
+  CpaStatus status = CPA_STATUS_SUCCESS;
+  using boost::asio::async_completion;
+  using Signature = void(boost::system::error_code);
+  async_completion<CompletionToken, Signature> init(token);
+  
+  auto ex = boost::asio::get_associated_executor(init.completion_handler);
+  completion_handler = [this, ex, handler = init.completion_handler](boost::system::error_code ec){
+    boost::asio::post(ex, std::bind(handler, ec));
+  };
+
+  status = cpaCySymPerformOp(
+    cyInstHandle,
+    (void *)this,
+    &pOpData,
+    pBufferList,
+    pBufferList,
+    NULL);
+
+  if (status != CPA_STATUS_SUCCESS) {
+    auto ec = boost::system::error_code{status, boost::system::system_category()};
+
+    boost::asio::dispatch(ex, [this, &ec](){
+      completion_handler(ec);
+    });
+  }
+
+  return init.result.get();
+}
 
 /*
  * Callback function
  */
-static void symDpCallback(CpaCySymDpOpData *pOpData,
+// static void symDpCallback(CpaCySymDpOpData *pOpData,
+//                         CpaStatus status,
+//                         CpaBoolean verifyResult)
+// {
+//   if (nullptr != pOpData->pCallbackTag)
+//   {
+//     if (static_cast<QatCrypto*>(pOpData->pCallbackTag)->complete()) {
+//       static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion_handler(boost::system::error_code{});
+//     }
+//   }
+// }
+
+static void symCallback(void *pCallbackTag,
                         CpaStatus status,
+                        const CpaCySymOp operationType,
+                        void *pOpData,
+                        CpaBufferList *pDstBuffer,
                         CpaBoolean verifyResult)
 {
-  if (nullptr != pOpData->pCallbackTag)
-  {
-    if (static_cast<QatCrypto*>(pOpData->pCallbackTag)->complete()) {
-      static_cast<QatCrypto*>(pOpData->pCallbackTag)->completion_handler(boost::system::error_code{});
+    if (NULL != pCallbackTag)
+    {
+        /* indicate that the function has been called */
+        static_cast<QatCipher*>(pCallbackTag)->completion_handler(boost::system::error_code{});
     }
-  }
 }
+
 
 static std::mutex qcc_alloc_mutex;
 static std::mutex qcc_eng_mutex;
 static std::atomic<bool> init_called = { false };
-
-
 
 template <typename CompletionToken>
 auto QccCrypto::async_get_instance(CompletionToken&& token) {
@@ -208,11 +290,11 @@ bool QccCrypto::init(const size_t chunk_size) {
       open_instances.push(iter);
       qcc_op_mem[iter].is_mem_alloc = false;
 
-      stat = cpaCySymDpRegCbFunc(qcc_inst->cy_inst_handles[iter], symDpCallback);
-      if (stat != CPA_STATUS_SUCCESS) {
-        dout(1) << "Unable to register callback function for instance " << iter << " with status = " << stat << dendl;
-        return false;
-      }
+      // stat = cpaCySymDpRegCbFunc(qcc_inst->cy_inst_handles[iter], symDpCallback);
+      // if (stat != CPA_STATUS_SUCCESS) {
+      //   dout(1) << "Unable to register callback function for instance " << iter << " with status = " << stat << dendl;
+      //   return false;
+      // }
     } else {
       dout(1) << "Unable to find address translations of instance " << iter << dendl;
       this->cleanup();
@@ -252,19 +334,19 @@ bool QccCrypto::destroy() {
   int iter = 0;
 
   // Free up op related memory
-  for (iter =0; iter < qcc_inst->num_instances; iter++) {
-    for (size_t i = 0; i < MAX_NUM_SYM_REQ_BATCH; i++) {
-      qcc_contig_mem_free((void **)&(qcc_op_mem[iter].src_buff[i]));
-      qcc_contig_mem_free((void **)&(qcc_op_mem[iter].iv_buff[i]));
-      qcc_contig_mem_free((void **)&(qcc_op_mem[iter].sym_op_data[i]));
-    }
-  }
+  // for (iter =0; iter < qcc_inst->num_instances; iter++) {
+  //   for (size_t i = 0; i < MAX_NUM_SYM_REQ_BATCH; i++) {
+  //     qcc_contig_mem_free((void **)&(qcc_op_mem[iter].src_buff[i]));
+  //     qcc_contig_mem_free((void **)&(qcc_op_mem[iter].iv_buff[i]));
+  //     qcc_contig_mem_free((void **)&(qcc_op_mem[iter].sym_op_data[i]));
+  //   }
+  // }
 
   // Free up Session memory
-  for (iter = 0; iter < qcc_inst->num_instances; iter++) {
-    cpaCySymDpRemoveSession(qcc_inst->cy_inst_handles[iter], qcc_sess[iter].sess_ctx);
-    qcc_contig_mem_free((void **)&(qcc_sess[iter].sess_ctx));
-  }
+  // for (iter = 0; iter < qcc_inst->num_instances; iter++) {
+  //   cpaCySymDpRemoveSession(qcc_inst->cy_inst_handles[iter], qcc_sess[iter].sess_ctx);
+  //   qcc_contig_mem_free((void **)&(qcc_sess[iter].sess_ctx));
+  // }
 
   // Stop QAT Instances
   for (iter = 0; iter < qcc_inst->num_instances; iter++) {
@@ -324,56 +406,60 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
    * Allocate buffers for this version of the instance if not already done.
    * Hold onto to most of them until destructor is called.
   */
-  if (qcc_op_mem[avail_inst].is_mem_alloc == false) {
-    for (size_t i = 0; i < MAX_NUM_SYM_REQ_BATCH; i++) {
-      // Allocate IV memory
-      status = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].iv_buff[i]), AES_256_IV_LEN, 8);
-      if (status != CPA_STATUS_SUCCESS) {
-        derr << "Unable to allocate iv_buff memory" << dendl;
-        return false;
-      }
+  // if (qcc_op_mem[avail_inst].is_mem_alloc == false) {
+  //   for (size_t i = 0; i < MAX_NUM_SYM_REQ_BATCH; i++) {
+  //     // Allocate IV memory
+  //     status = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].iv_buff[i]), AES_256_IV_LEN, 8);
+  //     if (status != CPA_STATUS_SUCCESS) {
+  //       derr << "Unable to allocate iv_buff memory" << dendl;
+  //       return false;
+  //     }
 
-      // Allocate src memory
-      status = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].src_buff[i]), chunk_size, 8);
-      if (status != CPA_STATUS_SUCCESS) {
-        derr << "Unable to allocate src_buff memory" << dendl;
-        return false;
-      }
+  //     // Allocate src memory
+  //     status = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].src_buff[i]), chunk_size, 8);
+  //     if (status != CPA_STATUS_SUCCESS) {
+  //       derr << "Unable to allocate src_buff memory" << dendl;
+  //       return false;
+  //     }
 
-      //Setup OpData
-      status = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].sym_op_data[i]),
-          sizeof(CpaCySymDpOpData), 8);
-      if (status != CPA_STATUS_SUCCESS) {
-        derr << "Unable to allocate opdata memory" << dendl;
-        return false;
-      }
-    }
+  //     //Setup OpData
+  //     status = qcc_contig_mem_alloc((void **)&(qcc_op_mem[avail_inst].sym_op_data[i]),
+  //         sizeof(CpaCySymDpOpData), 8);
+  //     if (status != CPA_STATUS_SUCCESS) {
+  //       derr << "Unable to allocate opdata memory" << dendl;
+  //       return false;
+  //     }
+  //   }
 
-    // Set memalloc flag so that we don't go through this exercise again.
-    qcc_op_mem[avail_inst].is_mem_alloc = true;
-    qcc_sess[avail_inst].sess_ctx = nullptr;
-    status = initSession(qcc_inst->cy_inst_handles[avail_inst],
-                             &(qcc_sess[avail_inst].sess_ctx),
-                             (Cpa8U *)key,
-                             op_type);
-  } else {
-    do {
-      status = updateSession(qcc_sess[avail_inst].sess_ctx,
-                                (Cpa8U *)key,
-                                op_type);
-      if (status == CPA_STATUS_RETRY) {
-        cpaCySymDpRemoveSession(qcc_inst->cy_inst_handles[avail_inst], qcc_sess[avail_inst].sess_ctx);
-        status = initSession(qcc_inst->cy_inst_handles[avail_inst],
-                             &(qcc_sess[avail_inst].sess_ctx),
-                             (Cpa8U *)key,
-                             op_type);
-      }
-    } while (status == CPA_STATUS_RETRY);
-  }
-  if (unlikely(status != CPA_STATUS_SUCCESS)) {
-    derr << "Unable to init session with status =" << status << dendl;
-    return false;
-  }
+  //   // Set memalloc flag so that we don't go through this exercise again.
+  //   qcc_op_mem[avail_inst].is_mem_alloc = true;
+  //   qcc_sess[avail_inst].sess_ctx = nullptr;
+  //   status = initSession(qcc_inst->cy_inst_handles[avail_inst],
+  //                            &(qcc_sess[avail_inst].sess_ctx),
+  //                            (Cpa8U *)key,
+  //                            op_type);
+  // } else {
+  //   do {
+  //     status = updateSession(qcc_sess[avail_inst].sess_ctx,
+  //                               (Cpa8U *)key,
+  //                               op_type);
+  //     if (status == CPA_STATUS_RETRY) {
+  //       cpaCySymDpRemoveSession(qcc_inst->cy_inst_handles[avail_inst], qcc_sess[avail_inst].sess_ctx);
+  //       status = initSession(qcc_inst->cy_inst_handles[avail_inst],
+  //                            &(qcc_sess[avail_inst].sess_ctx),
+  //                            (Cpa8U *)key,
+  //                            op_type);
+  //     }
+  //   } while (status == CPA_STATUS_RETRY);
+  // }
+  // if (unlikely(status != CPA_STATUS_SUCCESS)) {
+  //   derr << "Unable to init session with status =" << status << dendl;
+  //   return false;
+  // }
+
+  yield_context yield = y.get_yield_context();
+  boost::asio::io_context& context = y.get_io_context();
+  QatCipher cipher(cyInstHandle, op_type, key, context, yield);
 
   return symPerformOp(avail_inst,
                       qcc_sess[avail_inst].sess_ctx,
@@ -541,62 +627,83 @@ bool QccCrypto::symPerformOp(int avail_inst,
 }
 
 
-  class QatCipher {
-    boost::asio::io_context& context;
-    yield_context yield;
-   private:
-    CpaInstanceHandle cyInstHandle{nullptr};
-    CpaCySymSessionCtx sessionCtx{nullptr};
-    CpaBufferList *pBufferList{nullptr};
-   protected:
-    CpaCySymSessionSetupData* sessionSetupData;
-   public:
-    template <typename CompletionToken>
-    auto async_perform_op(CompletionToken&& token, CpaCySymOpData& pOpData);
-    std::function<void(boost::system::error_code)> completion_handler;
-
-    QatCipher (CpaInstanceHandle cyInstHandle, const CpaCySymCipherDirection op_type, Cpa8U *key,
-               boost::asio::io_context& context, yield_context yield);
-    QatCipher (const QatCipher &qat) = delete;
-    QatCipher (QatCipher &&qat) = delete;
-    ~QatCipher ();
-    void Restart();
-    void Final(unsigned char* out, const unsigned char* in, size_t size, Cpa8U *iv);
-  };
-
-template <typename CompletionToken>
-auto QatCipher::async_perform_op(CompletionToken&& token, CpaCySymOpData& pOpData)
-{
+bool QccCrypto::symPerformOp_single(int avail_inst,
+                              CpaCySymSessionCtx sessionCtx,
+                              const Cpa8U *pSrc,
+                              Cpa8U *pDst,
+                              Cpa32U size,
+                              Cpa8U *pIv,
+                              Cpa32U ivLen,
+                              optional_yield y) {
   CpaStatus status = CPA_STATUS_SUCCESS;
-  using boost::asio::async_completion;
-  using Signature = void(boost::system::error_code);
-  async_completion<CompletionToken, Signature> init(token);
-  // completion = Completion::create(context.get_executor(),
-  //                     std::move(init.completion_handler));
-  
-  auto ex = boost::asio::get_associated_executor(init.completion_handler);
-  completion_handler = [this, ex, handler = init.completion_handler](boost::system::error_code ec){
-    boost::asio::post(ex, std::bind(handler, ec));
-  };
+  Cpa32U one_batch_size = chunk_size * MAX_NUM_SYM_REQ_BATCH;
+  Cpa32U iv_index = 0;
 
-  status = cpaCySymPerformOp(
-    cyInstHandle,
-    (void *)this,
-    &pOpData,
-    pBufferList,
-    pBufferList,
-    NULL);
+  for (Cpa32U off = 0; off < size; off += one_batch_size) {
+    QatCrypto helper(y.get_io_context(), y.get_yield_context(), this);
+    std::vector<CpaCySymDpOpData*> pOpDataVec;
+    for (Cpa32U offset = off, i = 0; offset < size && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
+      CpaCySymDpOpData *pOpData = qcc_op_mem[avail_inst].sym_op_data[i];
+      Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
+      Cpa8U *pIvBuffer = qcc_op_mem[avail_inst].iv_buff[i];
+      Cpa32U process_size = offset + chunk_size <= size ? chunk_size : size - offset;
+      if (CPA_STATUS_SUCCESS == status) {
+        // copy source into buffer
+        memcpy(pSrcBuffer, pSrc + offset, process_size);
+        // copy IV into buffer
+        memcpy(pIvBuffer, &pIv[iv_index * ivLen], ivLen);
+        iv_index++;
 
-  if (status != CPA_STATUS_SUCCESS) {
-    auto ec = boost::system::error_code{status, boost::system::system_category()};
+        helper.count++;
 
-    boost::asio::dispatch(context, [this, &ec](){
-      completion_handler(ec);
-    });
+        //pOpData assignment
+        pOpData->thisPhys = qaeVirtToPhysNUMA(pOpData);
+        pOpData->instanceHandle = qcc_inst->cy_inst_handles[avail_inst];
+        pOpData->sessionCtx = sessionCtx;
+        pOpData->pCallbackTag = &helper;
+        pOpData->cryptoStartSrcOffsetInBytes = 0;
+        pOpData->messageLenToCipherInBytes = process_size;
+        pOpData->iv = qaeVirtToPhysNUMA(pIvBuffer);
+        pOpData->pIv = pIvBuffer;
+        pOpData->ivLenInBytes = ivLen;
+        pOpData->srcBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
+        pOpData->srcBufferLen = process_size;
+        pOpData->dstBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
+        pOpData->dstBufferLen = process_size;
+
+        pOpDataVec.push_back(pOpData);
+
+      }
+    }
+
+    boost::system::error_code ec;
+    yield_context yield = y.get_yield_context();
+    ceph_assert(!helper.completion_handler);
+
+    do {
+      helper.async_perform_op(avail_inst, pOpDataVec, yield[ec]);
+    } while (!ec && ec.value() == CPA_STATUS_RETRY);
+
+    if (likely(CPA_STATUS_SUCCESS == status)) {
+      for (Cpa32U offset = off, i = 0; offset < size && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
+        Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
+        Cpa32U process_size = offset + chunk_size <= size ? chunk_size : size - offset;
+        memcpy(pDst + offset, pSrcBuffer, process_size);
+      }
+    }
   }
 
-  return init.result.get();
+  Cpa32U max_used_buffer_num = iv_index > MAX_NUM_SYM_REQ_BATCH ? MAX_NUM_SYM_REQ_BATCH : iv_index;
+  for (Cpa32U i = 0; i < max_used_buffer_num; i++) {
+    memset(qcc_op_mem[avail_inst].src_buff[i], 0, chunk_size);
+    memset(qcc_op_mem[avail_inst].iv_buff[i], 0, ivLen);
+  }
+  return (status == CPA_STATUS_SUCCESS);
 }
+
+
+
+
 
 QatCipher::QatCipher(CpaInstanceHandle cyInstHandle, const CpaCySymCipherDirection op_type, Cpa8U *key,
                      boost::asio::io_context& context, yield_context yield)
@@ -605,38 +712,37 @@ QatCipher::QatCipher(CpaInstanceHandle cyInstHandle, const CpaCySymCipherDirecti
   memset(sessionSetupData, 0, sizeof(CpaCySymSessionSetupData));
   sessionSetupData->sessionPriority = CPA_CY_PRIORITY_NORMAL;
   sessionSetupData->symOperation = CPA_CY_SYM_OP_CIPHER;
-  sessionSetupData->cipherSetupData.chiperAlgorithm = CPA_CY_SYM_CIPHER_AES_CBC;
+  sessionSetupData->cipherSetupData.cipherAlgorithm = CPA_CY_SYM_CIPHER_AES_CBC;
   sessionSetupData->cipherSetupData.cipherKeyLenInBytes = 32;
   sessionSetupData->cipherSetupData.cipherDirection = op_type;
   sessionSetupData->cipherSetupData.pCipherKey = key;
 }
 
-
 struct CpaBufferListDeleter {
   void operator() (CpaBufferList* pBufferList) {
     void *pBufferMeta = nullptr;
     void *pSrcBuffer = nullptr;
-    void *pDigestBuffer = nullptr;
+    void *pIvBuffer = nullptr;
 
     if (pBufferList != nullptr) {
       pBufferMeta   = pBufferList->pPrivateMetaData;
       pIvBuffer = pBufferList->pUserData;
       pSrcBuffer    = pBufferList->pBuffers->pData;
-      qcc_contig_mem_free(&pSrcBuffer);
+      QatCipher::qcc_contig_mem_free(&pSrcBuffer);
       free(pBufferList);
-      qcc_contig_mem_free(&pBufferMeta);
-      qcc_contig_mem_free((void**)&pIvBuffer);
+      QatCipher::qcc_contig_mem_free(&pBufferMeta);
+      QatCipher::qcc_contig_mem_free((void**)&pIvBuffer);
     }
   }
 };
 
 using buffer_ptr = std::unique_ptr<CpaBufferList, CpaBufferListDeleter>;
 static std::vector<buffer_ptr> buffers;
-static std::mutex mutex;
+static std::mutex buffers_mutex;
 
 QatCipher::~QatCipher() {
   if (pBufferList != nullptr) {
-    std::scoped_lock lock{mutex};
+    std::scoped_lock lock{buffers_mutex};
     buffers.emplace_back(pBufferList);
   }
 
@@ -670,7 +776,7 @@ void QatCipher::Restart() {
     }
   }
 
-  // status = cpaCySymInitSession(cyInstHandle, symCallback, sessionSetupData, sessionCtx);
+  status = cpaCySymInitSession(cyInstHandle, symCallback, sessionSetupData, sessionCtx);
   if (status != CPA_STATUS_SUCCESS) {
     std::cout << "cpaCySymInitSession failed, stat = " << status << std::endl;;
     throw "cpaCySymInitSession failed";
@@ -702,7 +808,7 @@ static CpaBufferList* getCpaBufferList(CpaInstanceHandle cyInstHandle) {
   Cpa8U *pIvBuffer = nullptr;
 
   {
-    std::scoped_lock lock{mutex};
+    std::scoped_lock lock{buffers_mutex};
     if (!buffers.empty()) {
       pBufferList = buffers.back().release();
       buffers.pop_back();
@@ -714,7 +820,7 @@ static CpaBufferList* getCpaBufferList(CpaInstanceHandle cyInstHandle) {
 
   if (CPA_STATUS_SUCCESS == status)
   {
-    status = qcc_contig_mem_alloc((void**)&pBufferMeta, bufferMetaSize);
+    status = QatCipher::qcc_contig_mem_alloc((void**)&pBufferMeta, bufferMetaSize);
   }
 
   if (CPA_STATUS_SUCCESS == status)
@@ -725,12 +831,12 @@ static CpaBufferList* getCpaBufferList(CpaInstanceHandle cyInstHandle) {
 
   if (CPA_STATUS_SUCCESS == status)
   {
-    status = qcc_contig_mem_alloc((void**)&pSrcBuffer, bufferSize);
+    status = QatCipher::qcc_contig_mem_alloc((void**)&pSrcBuffer, bufferSize);
   }
 
   if (CPA_STATUS_SUCCESS == status)
   {
-    status = qcc_contig_mem_alloc((void**)&pIvBuffer, 16);
+    status = QatCipher::qcc_contig_mem_alloc((void**)&pIvBuffer, 16);
   }
 
   if (CPA_STATUS_SUCCESS == status)
@@ -767,10 +873,6 @@ void QatCipher::Final(unsigned char* out, const unsigned char* in, size_t size, 
 
   CpaCySymOpData pOpData = {0};
 
-  struct COMPLETION_STRUCT complete;
-
-  COMPLETION_INIT((&complete));
-
   pBufferList->pBuffers->dataLenInBytes = size;
 
   pOpData.sessionCtx = sessionCtx;
@@ -779,15 +881,6 @@ void QatCipher::Final(unsigned char* out, const unsigned char* in, size_t size, 
   pOpData.ivLenInBytes = 16;
   pOpData.cryptoStartSrcOffsetInBytes = 0;
   pOpData.messageLenToCipherInBytes = pBufferList->pBuffers->dataLenInBytes;
-
-  // do {
-  //   status = cpaCySymPerformOp(
-  //     cyInstHandle,
-  //     (void *)&complete,
-  //     &pOpData,
-  //     pBufferList,
-  //     pBufferList,
-  //     NULL);
 
   ceph_assert(!completion_handler);
   boost::system::error_code ec;
@@ -798,13 +891,6 @@ void QatCipher::Final(unsigned char* out, const unsigned char* in, size_t size, 
   if (CPA_STATUS_SUCCESS != status) {
     std::cout << "Final cpaCySymPerformOp failed. (status = " << status << std::endl;
   }
-
-  // if (CPA_STATUS_SUCCESS == status) {
-  //   if (!COMPLETION_WAIT((&complete), 30)) {
-  //     std::cout << "timeout or interruption in cpaCySymPerformOp" << std::endl;
-  //   }
-  // }
-  // COMPLETION_DESTROY(&complete);
 
   memcpy(out, pBufferList->pBuffers->pData, size);
 }
