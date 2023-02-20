@@ -44,6 +44,8 @@ class QccCrypto {
     template <typename CompletionToken>
     auto async_get_instance(CompletionToken&& token);
 
+    std::atomic<size_t> inst_count{0};
+
   public:
     CpaCySymCipherDirection qcc_op_type;
 

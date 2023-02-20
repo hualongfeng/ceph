@@ -387,20 +387,23 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
     dout(10) << "QAT not initialized in this instance or init failed" << dendl;
     return is_init;
   }
-  CpaStatus status = CPA_STATUS_SUCCESS;
+  // CpaStatus status = CPA_STATUS_SUCCESS;
   int avail_inst = -1;
+  {
+    std::scoped_lock lock{qcc_alloc_mutex};
+    avail_inst = inst_count++ % qcc_inst->num_instances;
+  }
+  // yield_context yield = y.get_yield_context();
+  // avail_inst = async_get_instance(yield);
 
-  yield_context yield = y.get_yield_context();
-  avail_inst = async_get_instance(yield);
+  // dout(1) << "Using dp_batch inst " << avail_inst << dendl;
 
-  dout(1) << "Using dp_batch inst " << avail_inst << dendl;
-
-  auto sg = make_scope_guard([this, avail_inst] {
-      //free up the instance irrespective of the op status
-      dout(15) << "Completed task under " << avail_inst << dendl;
-      qcc_op_mem[avail_inst].op_complete = false;
-      QccCrypto::QccFreeInstance(avail_inst);
-      });
+  // auto sg = make_scope_guard([this, avail_inst] {
+  //     //free up the instance irrespective of the op status
+  //     dout(15) << "Completed task under " << avail_inst << dendl;
+  //     qcc_op_mem[avail_inst].op_complete = false;
+  //     QccCrypto::QccFreeInstance(avail_inst);
+  //     });
 
   /*
    * Allocate buffers for this version of the instance if not already done.
@@ -457,17 +460,26 @@ bool QccCrypto::perform_op_batch(unsigned char* out, const unsigned char* in, si
   //   return false;
   // }
 
+  CpaInstanceHandle cyInstHandle = qcc_inst->cy_inst_handles[avail_inst];
   yield_context yield = y.get_yield_context();
   boost::asio::io_context& context = y.get_io_context();
   QatCipher cipher(cyInstHandle, op_type, key, context, yield);
 
-  return symPerformOp(avail_inst,
-                      qcc_sess[avail_inst].sess_ctx,
-                      in,
-                      out,
-                      size,
-                      reinterpret_cast<Cpa8U*>(iv),
-                      AES_256_IV_LEN, y);
+  int iv_index = 0;
+  for (Cpa32U offset = 0; offset < size; offset += chunk_size) {
+    Cpa32U process_size = offset + chunk_size <= size ? chunk_size : size - offset;
+    cipher.Final(out + offset, in + offset, process_size, &iv[iv_index * AES_256_IV_LEN]);
+    iv_index++;
+  }
+
+  return true;
+  // return symPerformOp(avail_inst,
+  //                     qcc_sess[avail_inst].sess_ctx,
+  //                     in,
+  //                     out,
+  //                     size,
+  //                     reinterpret_cast<Cpa8U*>(iv),
+  //                     AES_256_IV_LEN, y);
 }
 
 /*
@@ -627,84 +639,6 @@ bool QccCrypto::symPerformOp(int avail_inst,
 }
 
 
-bool QccCrypto::symPerformOp_single(int avail_inst,
-                              CpaCySymSessionCtx sessionCtx,
-                              const Cpa8U *pSrc,
-                              Cpa8U *pDst,
-                              Cpa32U size,
-                              Cpa8U *pIv,
-                              Cpa32U ivLen,
-                              optional_yield y) {
-  CpaStatus status = CPA_STATUS_SUCCESS;
-  Cpa32U one_batch_size = chunk_size * MAX_NUM_SYM_REQ_BATCH;
-  Cpa32U iv_index = 0;
-
-  for (Cpa32U off = 0; off < size; off += one_batch_size) {
-    QatCrypto helper(y.get_io_context(), y.get_yield_context(), this);
-    std::vector<CpaCySymDpOpData*> pOpDataVec;
-    for (Cpa32U offset = off, i = 0; offset < size && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
-      CpaCySymDpOpData *pOpData = qcc_op_mem[avail_inst].sym_op_data[i];
-      Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
-      Cpa8U *pIvBuffer = qcc_op_mem[avail_inst].iv_buff[i];
-      Cpa32U process_size = offset + chunk_size <= size ? chunk_size : size - offset;
-      if (CPA_STATUS_SUCCESS == status) {
-        // copy source into buffer
-        memcpy(pSrcBuffer, pSrc + offset, process_size);
-        // copy IV into buffer
-        memcpy(pIvBuffer, &pIv[iv_index * ivLen], ivLen);
-        iv_index++;
-
-        helper.count++;
-
-        //pOpData assignment
-        pOpData->thisPhys = qaeVirtToPhysNUMA(pOpData);
-        pOpData->instanceHandle = qcc_inst->cy_inst_handles[avail_inst];
-        pOpData->sessionCtx = sessionCtx;
-        pOpData->pCallbackTag = &helper;
-        pOpData->cryptoStartSrcOffsetInBytes = 0;
-        pOpData->messageLenToCipherInBytes = process_size;
-        pOpData->iv = qaeVirtToPhysNUMA(pIvBuffer);
-        pOpData->pIv = pIvBuffer;
-        pOpData->ivLenInBytes = ivLen;
-        pOpData->srcBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
-        pOpData->srcBufferLen = process_size;
-        pOpData->dstBuffer = qaeVirtToPhysNUMA(pSrcBuffer);
-        pOpData->dstBufferLen = process_size;
-
-        pOpDataVec.push_back(pOpData);
-
-      }
-    }
-
-    boost::system::error_code ec;
-    yield_context yield = y.get_yield_context();
-    ceph_assert(!helper.completion_handler);
-
-    do {
-      helper.async_perform_op(avail_inst, pOpDataVec, yield[ec]);
-    } while (!ec && ec.value() == CPA_STATUS_RETRY);
-
-    if (likely(CPA_STATUS_SUCCESS == status)) {
-      for (Cpa32U offset = off, i = 0; offset < size && i < MAX_NUM_SYM_REQ_BATCH; offset += chunk_size, i++) {
-        Cpa8U *pSrcBuffer = qcc_op_mem[avail_inst].src_buff[i];
-        Cpa32U process_size = offset + chunk_size <= size ? chunk_size : size - offset;
-        memcpy(pDst + offset, pSrcBuffer, process_size);
-      }
-    }
-  }
-
-  Cpa32U max_used_buffer_num = iv_index > MAX_NUM_SYM_REQ_BATCH ? MAX_NUM_SYM_REQ_BATCH : iv_index;
-  for (Cpa32U i = 0; i < max_used_buffer_num; i++) {
-    memset(qcc_op_mem[avail_inst].src_buff[i], 0, chunk_size);
-    memset(qcc_op_mem[avail_inst].iv_buff[i], 0, ivLen);
-  }
-  return (status == CPA_STATUS_SUCCESS);
-}
-
-
-
-
-
 QatCipher::QatCipher(CpaInstanceHandle cyInstHandle, const CpaCySymCipherDirection op_type, Cpa8U *key,
                      boost::asio::io_context& context, yield_context yield)
   : cyInstHandle(cyInstHandle), context(context), yield(yield) {
@@ -716,6 +650,7 @@ QatCipher::QatCipher(CpaInstanceHandle cyInstHandle, const CpaCySymCipherDirecti
   sessionSetupData->cipherSetupData.cipherKeyLenInBytes = 32;
   sessionSetupData->cipherSetupData.cipherDirection = op_type;
   sessionSetupData->cipherSetupData.pCipherKey = key;
+  Restart();
 }
 
 struct CpaBufferListDeleter {
@@ -766,19 +701,19 @@ void QatCipher::Restart() {
     // first need to alloc session memory
     status = cpaCySymSessionCtxGetSize(cyInstHandle, sessionSetupData, &sessionCtxSize);
     if (status != CPA_STATUS_SUCCESS) {
-      std::cout <<  "cpaCySymSessionCtxGetSize failed, stat = " << status << std::endl;
+      dout(1) <<  "cpaCySymSessionCtxGetSize failed, stat = " << status << dendl;
       throw "cpaCySymSessionCtxGetSize failed";
     }
     status = qcc_contig_mem_alloc((void**)&sessionCtx, sessionCtxSize);
     if (status != CPA_STATUS_SUCCESS) {
-      std::cout << "Failed to alloc contiguous memory for SessionCtx, stat = " << status << std::endl;
+      dout(1) << "Failed to alloc contiguous memory for SessionCtx, stat = " << status << dendl;
       throw "Failed to alloc contiguous memory for SessionCtx";
     }
   }
 
   status = cpaCySymInitSession(cyInstHandle, symCallback, sessionSetupData, sessionCtx);
   if (status != CPA_STATUS_SUCCESS) {
-    std::cout << "cpaCySymInitSession failed, stat = " << status << std::endl;;
+    dout(1) << "cpaCySymInitSession failed, stat = " << status << dendl;;
     throw "cpaCySymInitSession failed";
   }
 }
@@ -858,12 +793,13 @@ static CpaBufferList* getCpaBufferList(CpaInstanceHandle cyInstHandle) {
 }
 
 void QatCipher::Final(unsigned char* out, const unsigned char* in, size_t size, Cpa8U *iv) {
+  // dout(1) << "step in 'QatCipher::Final'" << dendl;
   CpaStatus status = CPA_STATUS_SUCCESS;
   if (pBufferList == nullptr) {
     pBufferList = getCpaBufferList(cyInstHandle);
 
     if (pBufferList == nullptr) {
-      std::cout << "cannot get CpaBufferList" << std::endl;
+      dout(1) << "cannot get CpaBufferList" << dendl;
       return;
     }
   }
@@ -882,14 +818,14 @@ void QatCipher::Final(unsigned char* out, const unsigned char* in, size_t size, 
   pOpData.cryptoStartSrcOffsetInBytes = 0;
   pOpData.messageLenToCipherInBytes = pBufferList->pBuffers->dataLenInBytes;
 
-  ceph_assert(!completion_handler);
+  // ceph_assert(!completion_handler);
   boost::system::error_code ec;
   do {
     async_perform_op(yield[ec], pOpData);
   } while (!ec && ec.value() == CPA_STATUS_RETRY);
 
   if (CPA_STATUS_SUCCESS != status) {
-    std::cout << "Final cpaCySymPerformOp failed. (status = " << status << std::endl;
+    dout(1) << "Final cpaCySymPerformOp failed. (status = " << status << dendl;
   }
 
   memcpy(out, pBufferList->pBuffers->pData, size);
