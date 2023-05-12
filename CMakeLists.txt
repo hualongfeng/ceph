@@ -303,6 +303,13 @@ endif()
 
 option(WITH_BLUEFS "libbluefs library" OFF)
 
+option(WITH_QPL "Enable QPL" OFF)
+if(WITH_QPL)
+  include(Buildqpl)
+  build_qpl()
+  set(HAVE_QPL TRUE)
+endif()
+
 option(WITH_QAT "Enable Qat driver" OFF)
 if(WITH_QAT)
   find_package(QatDrv REQUIRED COMPONENTS qat_s usdm_drv_s)

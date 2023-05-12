@@ -503,6 +503,10 @@ if(HAVE_QATZIP)
   list(APPEND ceph_common_deps ${qatzip_LIBRARIES})
 endif()
 
+if (HAVE_QPL)
+  list(APPEND ceph_common_deps ${qpl_LIBRARIES})
+endif()
+
 if(WITH_DPDK)
   list(APPEND ceph_common_deps common_async_dpdk)
 endif()
