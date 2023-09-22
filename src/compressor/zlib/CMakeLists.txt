@@ -1,6 +1,11 @@
 # zlib
-
-if(HAVE_INTEL_SSE4_1 AND HAVE_NASM_X64_AVX2 AND (NOT APPLE))
+if (HAVE_QPL)
+  set(zlib_sources
+    CompressionPluginZlib.cc
+    ZlibCompressor.cc
+    IaaAccel.cc
+  )
+elseif(HAVE_INTEL_SSE4_1 AND HAVE_NASM_X64_AVX2 AND (NOT APPLE))
   set(CMAKE_ASM_FLAGS "-i ${PROJECT_SOURCE_DIR}/src/isa-l/igzip/ -i ${PROJECT_SOURCE_DIR}/src/isa-l/include/ ${CMAKE_ASM_FLAGS}")
   set(zlib_sources
     CompressionPluginZlib.cc
@@ -88,9 +93,19 @@ else()
     ZlibCompressor.cc
   )
 endif()
+#if (HAVE_QPL)
+#  list(APPEND zlib_sources IaaAccel.cc)
+#endif() 
 
 add_library(ceph_zlib SHARED ${zlib_sources})
-target_link_libraries(ceph_zlib ZLIB::ZLIB compressor $<$<PLATFORM_ID:Windows>:ceph-common>)
+#target_link_libraries(ceph_zlib ZLIB::ZLIB compressor $<$<PLATFORM_ID:Windows>:ceph-common>)
+if (HAVE_QPL)
+#  target_link_libraries(ceph_zlib PRIVATE qpl::qpl)
+  target_link_libraries(ceph_zlib ZLIB::ZLIB compressor qpl::qpl $<$<PLATFORM_ID:Windows>:ceph-common>)
+else()
+  target_link_libraries(ceph_zlib ZLIB::ZLIB compressor $<$<PLATFORM_ID:Windows>:ceph-common>)
+endif()
+
 target_include_directories(ceph_zlib SYSTEM PRIVATE "${CMAKE_SOURCE_DIR}/src/isa-l/include")
 set_target_properties(ceph_zlib PROPERTIES
   VERSION 2.0.0
