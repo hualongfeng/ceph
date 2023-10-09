@@ -632,6 +632,7 @@ endif()
 # make rocksdb statically
 
 if(NOT WITH_SYSTEM_ROCKSDB)
+  add_link_options(-u iaa_compressor_reg)
   include(BuildRocksDB)
   build_rocksdb()
 endif(NOT WITH_SYSTEM_ROCKSDB)
