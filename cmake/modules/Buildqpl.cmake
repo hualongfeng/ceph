@@ -13,7 +13,7 @@ function(build_qpl)
     GIT_TAG "v1.1.0"
     SOURCE_DIR ${source_dir}
     CMAKE_ARGS
-      -DCMAKE_BUILD_TYPE=Release
+      -DCMAKE_BUILD_TYPE=Release -DQPL_BUILD_EXAMPLES=OFF -DQPL_BUILD_TESTS=OFF
     BINARY_DIR ${source_dir}
     BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR>
     INSTALL_COMMAND ""
