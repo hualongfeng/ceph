@@ -762,6 +762,12 @@ options:
   desc: Enable Intel QAT acceleration support for compression if available
   default: false
   with_legacy: true
+- name: iaa_compressor_enabled
+  type: bool
+  level: advanced
+  desc: Enable Intel IAA acceleration support for compression if available
+  default: false
+  with_legacy: true
 - name: qat_compressor_session_max_number
   type: uint
   level: advanced

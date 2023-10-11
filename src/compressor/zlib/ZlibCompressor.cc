@@ -175,7 +175,8 @@ int ZlibCompressor::compress(const bufferlist &in, bufferlist &out, std::optiona
     return qat_accel.compress(in, out, compressor_message);
 #endif
 #ifdef HAVE_QPL
-  return IaaAccel().compress(in, out, compressor_message);
+  if (cct->_conf->iaa_compressor_enabled)
+    return IaaAccel().compress(in, out, compressor_message);
 #endif
 #if (__x86_64__ && defined(HAVE_NASM_X64_AVX2)) || defined(__aarch64__)
   if (isal_enabled)
@@ -195,7 +196,8 @@ int ZlibCompressor::decompress(bufferlist::const_iterator &p, size_t compressed_
     return qat_accel.decompress(p, compressed_size, out, compressor_message);
 #endif
 #ifdef HAVE_QPL
-  return IaaAccel().decompress(p, compressed_size, out, compressor_message);
+  if (cct->_conf->iaa_compressor_enabled)
+    return IaaAccel().decompress(p, compressed_size, out, compressor_message);
 #endif
 
 
