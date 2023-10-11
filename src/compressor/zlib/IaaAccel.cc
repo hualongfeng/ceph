@@ -34,7 +34,7 @@ int IaaAccel::compress(const bufferlist &in, bufferlist &out, std::optional<int3
   unsigned char* c_in;
   int begin = 1;
 
-  qpl_path_t execution_path = qpl_path_software;
+  qpl_path_t execution_path = qpl_path_hardware;
 
   std::unique_ptr<uint8_t[]> job_buffer;
   qpl_status                 status;
