@@ -17,6 +17,7 @@
 #include "ZlibCompressor.h"
 #include "osd/osd_types.h"
 #include "isa-l/include/igzip_lib.h"
+#include "IaaAccel.h"
 // -----------------------------------------------------------------------------
 
 #include <zlib.h>
@@ -174,10 +175,12 @@ int ZlibCompressor::compress(const bufferlist &in, bufferlist &out, std::optiona
   if (qat_enabled)
     return qat_accel.compress(in, out, compressor_message);
 #endif
+
 #ifdef HAVE_QPL
   if (cct->_conf->iaa_compressor_enabled)
     return IaaAccel().compress(in, out, compressor_message);
 #endif
+
 #if (__x86_64__ && defined(HAVE_NASM_X64_AVX2)) || defined(__aarch64__)
   if (isal_enabled)
     return isal_compress(in, out, compressor_message);

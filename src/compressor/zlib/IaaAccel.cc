@@ -18,7 +18,7 @@ static std::ostream& _prefix(std::ostream* _dout) {
   return *_dout << "IaaAceel: ";
 }
 
-#define MAX_LEN (CEPH_PAGE_SIZE)
+#define MAX_LEN (CEPH_PAGE_SIZE*16)
 
 // default window size for Zlib 1.2.8, negated for raw deflate
 #define ZLIB_DEFAULT_WIN_SIZE -15
@@ -29,6 +29,8 @@ static const unsigned int expansion_ratio[] = {5, 20, 50, 100, 200, 1000, 10000}
 
 int IaaAccel::compress(const bufferlist &in, bufferlist &out, std::optional<int32_t> &compressor_message) {
   compressor_message = ZLIB_DEFAULT_WIN_SIZE;
+
+  dout(20) << "Using IAA compress." << dendl;
 
   unsigned have;
   unsigned char* c_in;
@@ -42,7 +44,7 @@ int IaaAccel::compress(const bufferlist &in, bufferlist &out, std::optional<int3
 
   status = qpl_get_job_size(execution_path, &size);
   if (status != QPL_STS_OK) {
-    dout(1) << "An error acquired during job size getting." << dendl;
+    dout(1) << "An error acquired during job size getting: status=" << status  << dendl;
     return -1;
   }
 
@@ -50,7 +52,7 @@ int IaaAccel::compress(const bufferlist &in, bufferlist &out, std::optional<int3
   qpl_job *job = reinterpret_cast<qpl_job*>(job_buffer.get());
   status = qpl_init_job(execution_path, job);
   if (status != QPL_STS_OK) {
-    dout(1) << "An error acuqired during compression job initializing." << dendl;
+    dout(1) << "An error acuqired during compression job initializing: status=" << status << dendl;
     return -1;
   }
 
@@ -82,8 +84,9 @@ int IaaAccel::compress(const bufferlist &in, bufferlist &out, std::optional<int3
       }
 
       status = qpl_execute_job(job);
+      dout(20) << "IAA compress count. in_size=" << job->available_in << dendl;
       if (status != QPL_STS_OK) {
-        dout(1) << "Error while compression occurred." << dendl;
+        dout(1) << "Error while compression occurred: status=" << status << dendl;
         qpl_fini_job(job);
         return -1;
       }
