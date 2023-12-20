@@ -20,6 +20,50 @@
 #include "common/errno.h"
 #include "ZstdCompressor.h"
 
+
+/* macros for lz4 */
+#define QZ_LZ4_MAGIC         0x184D2204U
+#define QZ_LZ4_MAGIC_SKIPPABLE 0x184D2A50U
+#define QZ_LZ4_VERSION       0x1
+#define QZ_LZ4_BLK_INDEP     0x0
+#define QZ_LZ4_BLK_CKS_FLAG  0x0
+#define QZ_LZ4_DICT_ID_FLAG  0x0
+#define QZ_LZ4_CNT_SIZE_FLAG 0x1
+#define QZ_LZ4_CNT_CKS_FLAG  0x1
+#define QZ_LZ4_ENDMARK       0x0
+#define QZ_LZ4_MAX_BLK_SIZE  0x4
+
+#define QZ_LZ4_MAGIC_SIZE      4                     //lz4 magic number length
+#define QZ_LZ4_FD_SIZE         11                    //lz4 frame descriptor length
+#define QZ_LZ4_HEADER_SIZE     (QZ_LZ4_MAGIC_SIZE + \
+                                QZ_LZ4_FD_SIZE)      //lz4 frame header length
+#define QZ_LZ4_CHECKSUM_SIZE   4                     //lz4 checksum length
+#define QZ_LZ4_ENDMARK_SIZE    4                     //lz4 endmark length
+#define QZ_LZ4_FOOTER_SIZE     (QZ_LZ4_CHECKSUM_SIZE + \
+                                QZ_LZ4_ENDMARK_SIZE) //lz4 frame footer length
+#define QZ_LZ4_BLK_HEADER_SIZE 4                     //lz4 block header length
+#define QZ_LZ4_STOREDBLOCK_FLAG 0x80000000U
+#define QZ_LZ4_STORED_HEADER_SIZE 4
+
+#pragma pack(push, 1)
+/* lz4 frame header */
+typedef struct QzLZ4H_S {
+    uint32_t magic; /* LZ4 magic number */
+    uint8_t flag_desc;
+    uint8_t block_desc;
+    uint64_t cnt_size;
+    uint8_t hdr_cksum; /* header checksum */
+} QzLZ4H_T;
+
+/* lz4 frame footer */
+typedef struct QzLZ4F_S {
+    uint32_t end_mark;  /* LZ4 end mark */
+    uint32_t cnt_cksum; /* content checksum */
+} QzLZ4F_T;
+#pragma pack(pop)
+
+
+
 // -----------------------------------------------------------------------------
 #define dout_context g_ceph_context
 #define dout_subsys ceph_subsys_compressor
@@ -64,6 +108,25 @@ typedef int64_t S64;
 #define QATZIP_MAX_HW_SZ (512 * KB)
 #define ZSRC_BUFF_LEN (512 * MB)
 #define MAX_BLOCK_SIZE (128 * KB)
+
+/*
+QzSessionParamsLZ4S_T sess_params_zstd_default = {
+    .common_params.direction         = QZ_DIRECTION_DEFAULT,
+    .common_params.comp_lvl          = QZ_COMP_LEVEL_DEFAULT,
+    .common_params.comp_algorithm    = QZ_LZ4s,
+    .common_params.max_forks         = QZ_MAX_FORK_DEFAULT,
+    .common_params.sw_backup         = QZ_SW_BACKUP_DEFAULT,
+    .common_params.hw_buff_sz        = QZ_HW_BUFF_SZ,
+    .common_params.strm_buff_sz      = QZ_STRM_BUFF_SZ_DEFAULT,
+    .common_params.input_sz_thrshold = QZ_COMP_THRESHOLD_DEFAULT,
+    .common_params.req_cnt_thrshold  = 32,
+    .common_params.wait_cnt_thrshold = QZ_WAIT_CNT_THRESHOLD_DEFAULT,
+    .common_params.polling_mode   = QZ_PERIODICAL_POLLING,
+    .lz4s_mini_match   = 3,
+    .qzCallback        = zstdCallBack,
+    .qzCallback_external = NULL
+};
+*/
 
 static unsigned int LZ4MINMATCH = 2;
 
@@ -156,6 +219,104 @@ void decLz4Block(unsigned char *lz4s, int lz4sSize, ZSTD_Sequence *zstdSeqs,
         }
     }
     assert(ip == endip);
+}
+
+inline int getLz4FrameHeaderSz()
+{
+    return QZ_LZ4_HEADER_SIZE;
+}
+
+inline int getLz4BlkHeaderSz()
+{
+    return QZ_LZ4_BLK_HEADER_SIZE;
+}
+
+inline int getLZ4FooterSz()
+{
+    return QZ_LZ4_FOOTER_SIZE;
+}
+
+int getContentSize(unsigned char *const ptr)
+{
+    QzLZ4H_T *hdr = NULL;
+    hdr = (QzLZ4H_T *)ptr;
+    assert(hdr->magic == QZ_LZ4_MAGIC);
+    return hdr->cnt_size;
+}
+
+unsigned int getBlockSize(unsigned char *const ptr)
+{
+    unsigned int blk_sz = *(unsigned int *)ptr;
+    return blk_sz;
+}
+
+int zstdCallBack(void *external, const unsigned char *src,
+                 unsigned int *src_len, unsigned char *dest,
+                 unsigned int *dest_len, int *ExtStatus)
+{
+    int ret = QZ_OK;
+    //copied data is used to decode
+    //original data will be overwrote by ZSTD_compressSequences
+    unsigned char *dest_data = (unsigned char *)malloc(*dest_len);
+    assert(dest_data != NULL);
+    memcpy(dest_data, dest, *dest_len);
+    unsigned char *cur = dest_data;
+    unsigned char *end = dest_data + *dest_len;
+
+    ZSTD_Sequence *zstd_seqs = (ZSTD_Sequence *)calloc(ZSTD_SEQUENCES_SIZE,
+                               sizeof(ZSTD_Sequence));
+    assert(zstd_seqs != NULL);
+
+    ZSTD_CCtx *zc = (ZSTD_CCtx *)external;
+
+    unsigned int produced = 0;
+    unsigned int consumed = 0;
+    unsigned int cnt_sz = 0, blk_sz = 0;    //content size and block size
+    unsigned int dec_offset = 0;
+    while (cur < end && *dest_len > 0) {
+        //decode block header and get block size
+        blk_sz = getBlockSize(cur);
+        cur += getLz4BlkHeaderSz();
+
+        //decode lz4s sequences into zstd sequences
+        decLz4Block(cur, blk_sz, zstd_seqs, &dec_offset);
+        cur += blk_sz;
+
+        cnt_sz = 0;
+        for (unsigned int i = 0; i < dec_offset + 1 ; i++) {
+            cnt_sz += (zstd_seqs[i].litLength + zstd_seqs[i].matchLength) ;
+        }
+        assert(cnt_sz <= MAX_BLOCK_SIZE);
+
+        // compress sequence to zstd frame
+        int compressed_sz = ZSTD_compressSequences(zc,
+                            dest + produced,
+                            ZSTD_compressBound(cnt_sz),
+                            zstd_seqs,
+                            dec_offset + 1,
+                            src + consumed,
+                            cnt_sz);
+
+        if (compressed_sz < 0) {
+            ret = QZ_POST_PROCESS_ERROR;
+            *ExtStatus = compressed_sz;
+//            QZ_ERROR("%s : ZSTD API ZSTD_compressSequences failed with error code, %d, %s\n",
+//                     ZSTD_ERROR_TYPE, *ExtStatus, DECODE_ZSTD_ERROR_CODE(*ExtStatus));
+            goto done;
+        }
+        //reuse zstd_seqs
+        memset(zstd_seqs, 0, ZSTD_SEQUENCES_SIZE * sizeof(ZSTD_Sequence));
+        dec_offset = 0;
+        produced += compressed_sz;
+        consumed += cnt_sz;
+    }
+
+    *dest_len = produced;
+
+done:
+    free(dest_data);
+    free(zstd_seqs);
+    return ret;
 }
 
 /* Estimate data expansion after decompression */
@@ -255,7 +416,7 @@ bool ZstdQatAccel::init(const std::string &alg) {
   }
 
   dout(15) << "First use for QAT compressor" << dendl;
-  if (alg != "zlib") {
+  if (alg != "zstd") {
     return false;
   }
 
