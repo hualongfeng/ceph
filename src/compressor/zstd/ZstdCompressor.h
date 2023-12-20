@@ -22,13 +22,55 @@
 #include "include/encoding.h"
 #include "compressor/Compressor.h"
 
+#include <condition_variable>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <vector>
+
+#include "include/buffer.h"
+
+extern "C" struct QzSession_S; // typedef struct QzSession_S QzSession_T;
+
+struct ZstdQzSessionDeleter {
+  void operator() (struct QzSession_S *session);
+};
+
+class ZstdQatAccel {
+ public:
+  using session_ptr = std::unique_ptr<struct QzSession_S, QzSessionDeleter>;
+  ZstdQatAccel();
+  ~ZstdQatAccel();
+
+  bool init(const std::string &alg);
+
+  int compress(const bufferlist &in, bufferlist &out, std::optional<int32_t> &compressor_message);
+  int decompress(const bufferlist &in, bufferlist &out, std::optional<int32_t> compressor_message);
+  int decompress(bufferlist::const_iterator &p, size_t compressed_len, bufferlist &dst, std::optional<int32_t> compressor_message);
+
+ private:
+  // get a session from the pool or create a new one. returns null if session init fails
+  session_ptr get_session();
+
+  friend struct cached_session_t;
+  std::vector<session_ptr> sessions;
+  std::mutex mutex;
+  std::string alg_name;
+};
+
+
+
 class ZstdCompressor : public Compressor {
  public:
   ZstdCompressor(CephContext *cct) : Compressor(COMP_ALG_ZSTD, "zstd"), cct(cct) {}
 
   int compress(const ceph::buffer::list &src, ceph::buffer::list &dst, std::optional<int32_t> &compressor_message) override {
     ZSTD_CStream *s = ZSTD_createCStream();
-    ZSTD_initCStream_srcSize(s, cct->_conf->compressor_zstd_level, src.length());
+    ZSTD_CCtx_reset(s, ZSTD_reset_session_only);
+    ZSTD_CCtx_refCDict(s, NULL); // clear the dictionary (if any)
+    ZSTD_CCtx_setParameter(s, ZSTD_c_compressionLevel, cct->_conf->compressor_zstd_level);
+    ZSTD_CCtx_setPledgedSrcSize(s, src.length());
+    //ZSTD_initCStream_srcSize(s, cct->_conf->compressor_zstd_level, src.length());
     auto p = src.begin();
     size_t left = src.length();
 
@@ -105,3 +147,4 @@ class ZstdCompressor : public Compressor {
 };
 
 #endif
+
