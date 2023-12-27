@@ -11,7 +11,8 @@ endif()
 
 set(zstd_sources
   CompressionPluginZstd.cc
-  ZstdQatAccel.cc)
+  ZstdQatAccel.cc
+  )
 
 add_library(ceph_zstd SHARED ${zstd_sources})
 if(HAVE_QATZIP AND HAVE_QATDRV)

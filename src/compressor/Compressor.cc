@@ -28,6 +28,7 @@ namespace TOPNSPC {
 
 #ifdef HAVE_QATZIP
   QatAccel Compressor::qat_accel;
+//  ZstdQatAccel Compressor::zstd_qat_accel;
 #endif
 
 const char* Compressor::get_comp_alg_name(int a) {

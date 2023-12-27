@@ -73,6 +73,9 @@ public:
 #ifdef HAVE_QATZIP
   bool qat_enabled;
   static QatAccel qat_accel;
+  bool zstd_qat_enabled;
+//  static ZstdQatAccel zstd_qat_accel;
+
 #endif
 
   static const char* get_comp_alg_name(int a);

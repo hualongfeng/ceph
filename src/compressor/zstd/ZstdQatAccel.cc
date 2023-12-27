@@ -20,6 +20,34 @@
 #include "common/errno.h"
 #include "ZstdCompressor.h"
 
+extern "C" struct QzSession_S; // typedef struct QzSession_S QzSession_T;
+
+struct ZstdQzSessionDeleter {
+  void operator() (struct QzSession_S *session);
+};
+
+class ZstdQatAccel {
+ public:
+  using session_ptr = std::unique_ptr<struct QzSession_S, QzSessionDeleter>;
+  ZstdQatAccel();
+  ~ZstdQatAccel();
+
+  bool init(const std::string &alg);
+
+  int compress(const bufferlist &in, bufferlist &out, std::optional<int32_t> &compressor_message);
+  int decompress(const bufferlist &in, bufferlist &out, std::optional<int32_t> compressor_message);
+  int decompress(bufferlist::const_iterator &p, size_t compressed_len, bufferlist &dst, std::optional<int32_t> compressor_message);
+
+ private:
+  // get a session from the pool or create a new one. returns null if session init fails
+  session_ptr get_session();
+
+  friend struct cached_session_t;
+  std::vector<session_ptr> sessions;
+  std::mutex mutex;
+  std::string alg_name;
+};
+
 
 /* macros for lz4 */
 #define QZ_LZ4_MAGIC         0x184D2204U
@@ -332,16 +360,48 @@ static bool setup_session(const std::string &alg, ZstdQatAccel::session_ptr &ses
   rc = qzInit(session.get(), QZ_SW_BACKUP_DEFAULT);
   if (rc != QZ_OK && rc != QZ_DUPLICATE)
     return false;
-  if (alg == "zlib") {
-    QzSessionParamsDeflate_T params;
-    rc = qzGetDefaultsDeflate(&params);
+  if (alg == "zstd") {
+    QzSessionParamsLZ4S_T params;
+    rc = qzGetDefaultsLZ4S(&params);
     if (rc != QZ_OK)
       return false;
-    params.data_fmt = QZ_DEFLATE_RAW;
-    params.common_params.comp_algorithm = QZ_DEFLATE;
-    params.common_params.comp_lvl = g_ceph_context->_conf->compressor_zlib_level;
-    params.common_params.direction = QZ_DIR_BOTH;
-    rc = qzSetupSessionDeflate(session.get(), &params);
+    params.common_params.direction         = QZ_DIR_BOTH;
+    params.common_params.comp_lvl          = g_ceph_context->_conf->compressor_zlib_level;
+    params.common_params.comp_algorithm    = QZ_LZ4s;
+    params.common_params.max_forks         = QZ_MAX_FORK_DEFAULT;
+    params.common_params.sw_backup         = QZ_SW_BACKUP_DEFAULT;
+    params.common_params.hw_buff_sz        = QZ_HW_BUFF_SZ;
+    params.common_params.strm_buff_sz      = QZ_STRM_BUFF_SZ_DEFAULT;
+    params.common_params.input_sz_thrshold = QZ_COMP_THRESHOLD_DEFAULT;
+    params.common_params.req_cnt_thrshold  = 32;
+    params.common_params.wait_cnt_thrshold = QZ_WAIT_CNT_THRESHOLD_DEFAULT;
+    params.common_params.polling_mode   = QZ_PERIODICAL_POLLING;
+    params.lz4s_mini_match   = 3;
+    params.qzCallback        = zstdCallBack;
+    params.qzCallback_external = NULL;
+
+    //initial zstd context
+    ZSTD_CCtx *zc = ZSTD_createCCtx();
+    if (zc == NULL) {
+        dout(15) << "ZSTD_createCCtx failed: " << dendl;
+        return QZSTD_ERROR;
+    }
+    ZSTD_CCtx_setParameter(zc, ZSTD_c_blockDelimiters,
+                           ZSTD_sf_explicitBlockDelimiters);
+    params.qzCallback_external = (void *)zc;
+
+    /* Different mini_match would use different LZ4MINMATCH to decode
+    * lz4s sequence. note that when it is mini_match is 4, the LZ4MINMATCH
+    * should be 3. if mini match is 3, then LZ4MINMATCH should be 2*/
+    LZ4MINMATCH = params.lz4s_mini_match == 4 ? 3 : 2;
+
+    /* Align zstd minmatch to the QAT minmatch */
+    ZSTD_CCtx_setParameter(
+        zc, ZSTD_c_minMatch,
+        params.lz4s_mini_match >= 4 ? 4 : 3
+    );
+
+    rc = qzSetupSessionLZ4S(session.get(), &params);
     if (rc != QZ_OK)
       return false;
   }
@@ -397,7 +457,9 @@ ZstdQatAccel::session_ptr ZstdQatAccel::get_session() {
   }
 }
 
-ZstdQatAccel::ZstdQatAccel() {}
+ZstdQatAccel::ZstdQatAccel() {
+  init("zstd");
+}
 
 ZstdQatAccel::~ZstdQatAccel() {
   // First, we should uninitialize all QATzip session that disconnects all session
@@ -425,90 +487,146 @@ bool ZstdQatAccel::init(const std::string &alg) {
 }
 
 int ZstdQatAccel::compress(const bufferlist &in, bufferlist &out, std::optional<int32_t> &compressor_message) {
+  int rc;
+  uint64_t callback_error_code = 0;
   auto s = get_session(); // get a session from the pool
   if (!s) {
     return -1; // session initialization failed
   }
   auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
-  compressor_message = ZLIB_DEFAULT_WIN_SIZE;
-  int begin = 1;
+
+  // prefix with decompressed length
+  ceph::encode((uint32_t)in.length(), out);
+
   for (auto &i : in.buffers()) {
     const unsigned char* c_in = (unsigned char*) i.c_str();
     unsigned int len = i.length();
-    unsigned int out_len = qzMaxCompressedLength(len, session.get()) + begin;
+    unsigned int out_len = qzMaxCompressedLength(len, session.get());
+    out_len = ZSTD_compressBound(out_len);
 
     bufferptr ptr = buffer::create_small_page_aligned(out_len);
-    unsigned char* c_out = (unsigned char*)ptr.c_str() + begin;
-    int rc = qzCompress(session.get(), c_in, &len, c_out, &out_len, 1);
-    if (rc != QZ_OK)
+    unsigned char* c_out = (unsigned char*)ptr.c_str();
+    if (len < QZ_COMP_THRESHOLD_DEFAULT) {
+      //initial zstd context
+      ZSTD_CCtx *zc = ZSTD_createCCtx();
+      if (zc == NULL) {
+          dout(15) << "ZSTD_createCCtx failed: " << dendl;
+          return QZSTD_ERROR;
+      }
+      ZSTD_CCtx_setParameter(zc, ZSTD_c_blockDelimiters,
+                             ZSTD_sf_explicitBlockDelimiters);
+
+      /* Align zstd minmatch to the QAT minmatch */
+      ZSTD_CCtx_setParameter(
+          zc, ZSTD_c_minMatch,
+          3 >= 4 ? 4 : 3
+      );
+      out_len = ZSTD_compressCCtx(zc, c_out, out_len, c_in, len, 1);
+      if (zc != NULL) {
+        ZSTD_freeCCtx(zc);
+      }
+    } else {
+      rc = qzCompressExt(session.get(), c_in, &len, c_out, &out_len, 1, &callback_error_code);
+    }
+    if (rc != QZ_OK) {
+      dout(1) << "ZSTD API ZSTD_compressSequences failed with error code " << callback_error_code << dendl;
       return -1;
-    if (begin) {
-      // put a compressor variation mark in front of compressed stream, not used at the moment
-      ptr.c_str()[0] = 0;
-      out_len += begin;
-      begin = 0;
     }
     out.append(ptr, 0, out_len);
 
   }
-
   return 0;
 }
 
-int ZstdQatAccel::decompress(const bufferlist &in, bufferlist &out, std::optional<int32_t> compressor_message) {
-  auto i = in.begin();
-  return decompress(i, in.length(), out, compressor_message);
-}
 
-int ZstdQatAccel::decompress(bufferlist::const_iterator &p,
-		 size_t compressed_len,
-		 bufferlist &dst,
-		 std::optional<int32_t> compressor_message) {
-  auto s = get_session(); // get a session from the pool
-  if (!s) {
-    return -1; // session initialization failed
-  }
-  auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
-  int begin = 1;
 
-  int rc = 0;
-  bufferlist tmp;
-  size_t remaining = std::min<size_t>(p.get_remaining(), compressed_len);
+#include "ZstdCompressor.h"
 
-  while (remaining) {
-    unsigned int ratio_idx = 0;
-    const char* c_in = nullptr;
-    unsigned int len = p.get_ptr_and_advance(remaining, &c_in);
-    remaining -= len;
-    len -= begin;
-    c_in += begin;
-    begin = 0;
-    unsigned int out_len = QZ_HW_BUFF_SZ;
 
-    bufferptr ptr;
-    do {
-      while (out_len <= len * expansion_ratio[ratio_idx]) {
-        out_len *= 2;
+static ZstdQatAccel zstd_qat_accel;
+
+int ZstdCompressor::compress(const ceph::buffer::list &src, ceph::buffer::list &dst, std::optional<int32_t> &compressor_message) {
+
+#ifdef HAVE_QATZIP
+  if (zstd_qat_enabled)
+    return zstd_qat_accel.compress(src, dst, compressor_message);
+#endif
+
+    ZSTD_CStream *s = ZSTD_createCStream();
+    ZSTD_CCtx_reset(s, ZSTD_reset_session_only);
+    ZSTD_CCtx_refCDict(s, NULL); // clear the dictionary (if any)
+    ZSTD_CCtx_setParameter(s, ZSTD_c_compressionLevel, cct->_conf->compressor_zstd_level);
+    ZSTD_CCtx_setPledgedSrcSize(s, src.length());
+    //ZSTD_initCStream_srcSize(s, cct->_conf->compressor_zstd_level, src.length());
+    auto p = src.begin();
+    size_t left = src.length();
+
+    size_t const out_max = ZSTD_compressBound(left);
+    ceph::buffer::ptr outptr = ceph::buffer::create_small_page_aligned(out_max);
+    ZSTD_outBuffer_s outbuf;
+    outbuf.dst = outptr.c_str();
+    outbuf.size = outptr.length();
+    outbuf.pos = 0;
+
+    while (left) {
+      ceph_assert(!p.end());
+      struct ZSTD_inBuffer_s inbuf;
+      inbuf.pos = 0;
+      inbuf.size = p.get_ptr_and_advance(left, (const char**)&inbuf.src);
+      left -= inbuf.size;
+      ZSTD_EndDirective const zed = (left==0) ? ZSTD_e_end : ZSTD_e_continue;
+      size_t r = ZSTD_compressStream2(s, &outbuf, &inbuf, zed);
+      if (ZSTD_isError(r)) {
+	return -EINVAL;
       }
+    }
+    ceph_assert(p.end());
 
-      ptr = buffer::create_small_page_aligned(out_len);
-      rc = qzDecompress(session.get(), (const unsigned char*)c_in, &len, (unsigned char*)ptr.c_str(), &out_len);
-      ratio_idx++;
-    } while (rc == QZ_BUF_ERROR && ratio_idx < std::size(expansion_ratio));
+    ZSTD_freeCStream(s);
 
-    if (rc == QZ_OK) {
-      dst.append(ptr, 0, out_len);
-    } else if (rc == QZ_DATA_ERROR) {
-      dout(1) << "QAT compressor DATA ERROR" << dendl;
-      return -1;
-    } else if (rc == QZ_BUF_ERROR) {
-      dout(1) << "QAT compressor BUF ERROR" << dendl;
-      return -1;
-    } else if (rc != QZ_OK) {
-      dout(1) << "QAT compressor NOT OK" << dendl;
+    // prefix with decompressed length
+    ceph::encode((uint32_t)src.length(), dst);
+    dst.append(outptr, 0, outbuf.pos);
+    return 0;
+  }
+
+int ZstdCompressor::decompress(const ceph::buffer::list &src, ceph::buffer::list &dst, std::optional<int32_t> compressor_message) {
+    auto i = std::cbegin(src);
+    return decompress(i, src.length(), dst, compressor_message);
+  }
+
+  int ZstdCompressor::decompress(ceph::buffer::list::const_iterator &p,
+		 size_t compressed_len,
+		 ceph::buffer::list &dst,
+		 std::optional<int32_t> compressor_message) {
+    if (compressed_len < 4) {
       return -1;
     }
+    compressed_len -= 4;
+    uint32_t dst_len;
+    ceph::decode(dst_len, p);
+
+    ceph::buffer::ptr dstptr(dst_len);
+    ZSTD_outBuffer_s outbuf;
+    outbuf.dst = dstptr.c_str();
+    outbuf.size = dstptr.length();
+    outbuf.pos = 0;
+    ZSTD_DStream *s = ZSTD_createDStream();
+    ZSTD_initDStream(s);
+    while (compressed_len > 0) {
+      if (p.end()) {
+	return -1;
+      }
+      ZSTD_inBuffer_s inbuf;
+      inbuf.pos = 0;
+      inbuf.size = p.get_ptr_and_advance(compressed_len,
+					 (const char**)&inbuf.src);
+      ZSTD_decompressStream(s, &outbuf, &inbuf);
+      compressed_len -= inbuf.size;
+    }
+    ZSTD_freeDStream(s);
+
+    dst.append(dstptr, 0, outbuf.pos);
+    return 0;
   }
 
-  return 0;
-}

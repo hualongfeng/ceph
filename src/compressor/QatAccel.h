@@ -51,4 +51,26 @@ class QatAccel {
   std::string alg_name;
 };
 
+/*
+class ZstdQatAccel {
+ public:
+  using session_ptr = std::unique_ptr<struct QzSession_S, QzSessionDeleter>;
+  ZstdQatAccel();
+  ~ZstdQatAccel();
+
+  bool init(const std::string &alg);
+
+  int compress(const bufferlist &in, bufferlist &out, std::optional<int32_t> &compressor_message);
+
+ private:
+  // get a session from the pool or create a new one. returns null if session init fails
+  session_ptr get_session();
+
+  friend struct cached_session_t;
+  std::vector<session_ptr> sessions;
+  std::mutex mutex;
+  std::string alg_name;
+};
+*/
+
 #endif
