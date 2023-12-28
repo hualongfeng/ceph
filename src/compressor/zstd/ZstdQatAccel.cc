@@ -383,7 +383,7 @@ static bool setup_session(const std::string &alg, ZstdQatAccel::session_ptr &ses
     //initial zstd context
     ZSTD_CCtx *zc = ZSTD_createCCtx();
     if (zc == NULL) {
-        dout(15) << "ZSTD_createCCtx failed: " << dendl;
+        dout(1) << "ZSTD_createCCtx failed: " << dendl;
         return QZSTD_ERROR;
     }
     ZSTD_CCtx_setParameter(zc, ZSTD_c_blockDelimiters,
@@ -506,32 +506,36 @@ int ZstdQatAccel::compress(const bufferlist &in, bufferlist &out, std::optional<
 
     bufferptr ptr = buffer::create_small_page_aligned(out_len);
     unsigned char* c_out = (unsigned char*)ptr.c_str();
-    if (len < QZ_COMP_THRESHOLD_DEFAULT) {
+//    if (len < QZ_COMP_THRESHOLD_DEFAULT) {
       //initial zstd context
-      ZSTD_CCtx *zc = ZSTD_createCCtx();
-      if (zc == NULL) {
-          dout(15) << "ZSTD_createCCtx failed: " << dendl;
-          return QZSTD_ERROR;
+//    ZSTD_CCtx *zc = ZSTD_createCCtx();
+//    if (zc == NULL) {
+//        dout(1) << "ZSTD_createCCtx failed: " << dendl;
+//        return QZSTD_ERROR;
+//    }
+//    ZSTD_CCtx_setParameter(zc, ZSTD_c_blockDelimiters,
+//                           ZSTD_sf_explicitBlockDelimiters);
+//
+//    // Align zstd minmatch to the QAT minmatch
+//    ZSTD_CCtx_setParameter(
+//        zc, ZSTD_c_minMatch,
+//        3 >= 4 ? 4 : 3
+//    );
+//    out_len = ZSTD_compressCCtx(zc, c_out, out_len, c_in, len, 1);
+//    if (out_len <= 0) {
+//        dout(1) << "ZSTD API ZSTD_compressCCtx failed. c_in len=" << len << dendl;
+//        return QZSTD_ERROR;
+//    }
+//    if (zc != NULL) {
+//      ZSTD_freeCCtx(zc);
+//    }
+//    } else {
+        rc = qzCompressExt(session.get(), c_in, &len, c_out, &out_len, 1, &callback_error_code);
+//    }
+      if (rc != QZ_OK) {
+        dout(1) << "ZSTD API ZSTD_compressSequences failed with error code " << callback_error_code << dendl;
+        return -1;
       }
-      ZSTD_CCtx_setParameter(zc, ZSTD_c_blockDelimiters,
-                             ZSTD_sf_explicitBlockDelimiters);
-
-      /* Align zstd minmatch to the QAT minmatch */
-      ZSTD_CCtx_setParameter(
-          zc, ZSTD_c_minMatch,
-          3 >= 4 ? 4 : 3
-      );
-      out_len = ZSTD_compressCCtx(zc, c_out, out_len, c_in, len, 1);
-      if (zc != NULL) {
-        ZSTD_freeCCtx(zc);
-      }
-    } else {
-      rc = qzCompressExt(session.get(), c_in, &len, c_out, &out_len, 1, &callback_error_code);
-    }
-    if (rc != QZ_OK) {
-      dout(1) << "ZSTD API ZSTD_compressSequences failed with error code " << callback_error_code << dendl;
-      return -1;
-    }
     out.append(ptr, 0, out_len);
 
   }
@@ -548,7 +552,7 @@ static ZstdQatAccel zstd_qat_accel;
 int ZstdCompressor::compress(const ceph::buffer::list &src, ceph::buffer::list &dst, std::optional<int32_t> &compressor_message) {
 
 #ifdef HAVE_QATZIP
-  if (zstd_qat_enabled)
+  if (zstd_qat_enabled && src.length() >= 32768)
     return zstd_qat_accel.compress(src, dst, compressor_message);
 #endif
 
