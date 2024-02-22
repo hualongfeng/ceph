@@ -14,12 +14,13 @@ set(zstd_sources
   ZstdCompressor.cc)
 
 add_library(ceph_zstd SHARED ${zstd_sources})
-if(HAVE_QATDRV)
+if(HAVE_QATSEQPROD AND HAVE_QATDRV)
 target_link_libraries(ceph_zstd PRIVATE 
 	              Zstd::Zstd 
 		      $<$<PLATFORM_ID:Windows>:ceph-common>
 		      QatDrv::qat_s
-		      QatDrv::usdm_drv_s)
+		      QatDrv::usdm_drv_s
+		      qatseqprod::qatseqprod)
 else()
 target_link_libraries(ceph_zstd PRIVATE Zstd::Zstd $<$<PLATFORM_ID:Windows>:ceph-common>)
 endif()

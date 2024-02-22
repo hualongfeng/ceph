@@ -20,7 +20,15 @@
 
 class ZstdCompressor : public Compressor {
  public:
-  ZstdCompressor(CephContext *cct) : Compressor(COMP_ALG_ZSTD, "zstd"), cct(cct) {}
+  ZstdCompressor(CephContext *cct) : Compressor(COMP_ALG_ZSTD, "zstd"), cct(cct) {
+#ifdef HAVE_QATSEQPROD
+    if (cct->_conf->qat_compressor_enabled)
+      qat_enabled = true;
+    else
+      qat_enabled = false;
+#endif
+
+  }
 
   int compress(const ceph::buffer::list &src, ceph::buffer::list &dst, std::optional<int32_t> &compressor_message) override;
 

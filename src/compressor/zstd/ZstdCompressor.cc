@@ -21,9 +21,64 @@
 #include "include/encoding.h"
 #include "compressor/Compressor.h"
 #include "common/ceph_context.h"
+#include "common/common_init.h"
+#include "common/debug.h"
+#include "common/dout.h"
+#include "common/errno.h"
+
+
+#include "qatseqprod.h"
+
+
+// -----------------------------------------------------------------------------
+#define dout_context cct
+#define dout_subsys ceph_subsys_compressor
+#undef dout_prefix
+#define dout_prefix _prefix(_dout)
+// -----------------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
+
+using std::ostream;
+
+using ceph::bufferlist;
+using ceph::bufferptr;
+
+static ostream&
+_prefix(std::ostream* _dout)
+{
+  return *_dout << "ZstdCompressor: ";
+}
+// -----------------------------------------------------------------------------
+
 
 int ZstdCompressor::compress(const ceph::buffer::list &src, ceph::buffer::list &dst, std::optional<int32_t> &compressor_message) {
+  void *sequenceProducerState{nullptr};
   ZSTD_CStream *s = ZSTD_createCStream();
+
+  qat_enabled=true;
+  if (qat_enabled) {
+
+    dout(15) << "Start to use QAT" << dendl;
+    QZSTD_startQatDevice();
+    sequenceProducerState = QZSTD_createSeqProdState();
+    ZSTD_registerSequenceProducer(
+          	  s,
+          	  sequenceProducerState,
+          	  qatSequenceProducer
+          	  );
+//  int res = ZSTD_CCtx_setParameter(s, ZSTD_c_enableSeqProducerFallback, 1);
+//  if (res <= 0) {
+//    dout(1) << "Failed to set fallback: res=" << res << dendl;
+//    return -1;
+//  }
+    int res = ZSTD_CCtx_setParameter(s, ZSTD_c_searchForExternalRepcodes, ZSTD_ps_disable);
+    if (res <= 0) {
+      dout(1) << "Failed to set searchForExternalRepcodes: res=" << res << dendl;
+      return -1;
+    }
+  }
+
   ZSTD_CCtx_reset(s, ZSTD_reset_session_only);
   ZSTD_CCtx_refCDict(s, NULL); // clear the dictionary (if any)
   ZSTD_CCtx_setParameter(s, ZSTD_c_compressionLevel, cct->_conf->compressor_zstd_level);
@@ -58,6 +113,11 @@ int ZstdCompressor::compress(const ceph::buffer::list &src, ceph::buffer::list &
   // prefix with decompressed length
   ceph::encode((uint32_t)src.length(), dst);
   dst.append(outptr, 0, outbuf.pos);
+
+  if (qat_enabled && sequenceProducerState != nullptr) {
+    QZSTD_freeSeqProdState(sequenceProducerState);
+  }
+
   return 0;
 }
 

@@ -70,8 +70,8 @@ public:
     COMP_FORCE                  ///< compress always
   };
 
+  bool qat_enabled{false};
 #ifdef HAVE_QATZIP
-  bool qat_enabled;
   static QatAccel qat_accel;
 #endif
 
