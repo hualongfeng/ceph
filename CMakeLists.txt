@@ -348,6 +348,12 @@ if(WITH_QATZIP)
   set(HAVE_QATZIP TRUE)
 endif(WITH_QATZIP)
 
+option(WITH_QATSEQPROD "Enable QATSEQPROD" ON)
+if(WITH_QATSEQPROD)
+  find_package(qatseqprod REQUIRED)
+  set(HAVE_QATSEQPROD ${qatseqprod_FOUND})
+endif(WITH_QATSEQPROD)
+
 # needs mds and? XXX
 option(WITH_LIBCEPHFS "libcephfs client library" ON)
 

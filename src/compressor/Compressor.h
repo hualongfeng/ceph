@@ -67,6 +67,7 @@ public:
     COMP_FORCE                  ///< compress always
   };
 
+
   static const char* get_comp_alg_name(int a);
   static std::optional<CompressionAlgorithm> get_comp_alg_type(std::string_view s);
 
