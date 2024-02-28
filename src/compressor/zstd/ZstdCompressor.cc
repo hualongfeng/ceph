@@ -56,7 +56,7 @@ int ZstdCompressor::compress(const ceph::buffer::list &src, ceph::buffer::list &
   void *sequenceProducerState{nullptr};
   ZSTD_CStream *s = ZSTD_createCStream();
 
-  bool qat_enabled=true;
+  bool qat_enabled=cct->_conf->qat_compressor_enabled;
   if (qat_enabled) {
 
     dout(15) << "Start to use QAT" << dendl;
@@ -68,12 +68,12 @@ int ZstdCompressor::compress(const ceph::buffer::list &src, ceph::buffer::list &
           	  qatSequenceProducer
           	  );
 //  int res = ZSTD_CCtx_setParameter(s, ZSTD_c_enableSeqProducerFallback, 1);
-//  if (res <= 0) {
+//  if (res < 0) {
 //    dout(1) << "Failed to set fallback: res=" << res << dendl;
 //    return -1;
 //  }
-    int res = ZSTD_CCtx_setParameter(s, ZSTD_c_searchForExternalRepcodes, ZSTD_ps_disable);
-    if (res <= 0) {
+    int res = ZSTD_CCtx_setParameter(s, ZSTD_c_searchForExternalRepcodes, ZSTD_ps_auto);
+    if (res < 0) {
       dout(1) << "Failed to set searchForExternalRepcodes: res=" << res << ZSTD_getErrorName(res) << dendl;
       return -1;
     }
