@@ -35,7 +35,7 @@ static std::ostream& _prefix(std::ostream* _dout)
 #define ZLIB_DEFAULT_WIN_SIZE -15
 
 /* Estimate data expansion after decompression */
-static const unsigned int expansion_ratio[] = {5, 20, 50, 100, 200, 1000, 10000};
+static const unsigned int expansion_ratio[] = {2, 5, 20, 50, 100, 200, 1000, 10000};
 
 void QzSessionDeleter::operator() (struct QzSession_S *session) {
   qzTeardownSession(session);
@@ -52,7 +52,7 @@ static bool setup_session(const std::string &alg, QatAccel::session_ptr &session
     rc = qzGetDefaultsDeflate(&params);
     if (rc != QZ_OK)
       return false;
-    params.data_fmt = QZ_DEFLATE_RAW;
+    params.data_fmt = QZ_DEFLATE_GZIP_EXT;
     params.common_params.comp_algorithm = QZ_DEFLATE;
     params.common_params.comp_lvl = g_ceph_context->_conf->compressor_zlib_level;
     params.common_params.direction = QZ_DIR_BOTH;
@@ -188,41 +188,39 @@ int QatAccel::decompress(bufferlist::const_iterator &p,
 
   int rc = 0;
   bufferlist tmp;
-  size_t remaining = std::min<size_t>(p.get_remaining(), compressed_len);
+  unsigned int ratio_idx = 0;
+  const char* c_in = nullptr;
+  p.copy_all(tmp);
+  c_in = tmp.c_str();
+  unsigned int len = tmp.length();
 
-  while (remaining) {
-    unsigned int ratio_idx = 0;
-    const char* c_in = nullptr;
-    unsigned int len = p.get_ptr_and_advance(remaining, &c_in);
-    remaining -= len;
-    len -= begin;
-    c_in += begin;
-    begin = 0;
-    unsigned int out_len = QZ_HW_BUFF_SZ;
+  len -= begin;
+  c_in += begin;
+  begin = 0;
+  unsigned int out_len = QZ_HW_BUFF_SZ;
 
-    bufferptr ptr;
-    do {
-      while (out_len <= len * expansion_ratio[ratio_idx]) {
-        out_len *= 2;
-      }
-
-      ptr = buffer::create_small_page_aligned(out_len);
-      rc = qzDecompress(session.get(), (const unsigned char*)c_in, &len, (unsigned char*)ptr.c_str(), &out_len);
-      ratio_idx++;
-    } while (rc == QZ_BUF_ERROR && ratio_idx < std::size(expansion_ratio));
-
-    if (rc == QZ_OK) {
-      dst.append(ptr, 0, out_len);
-    } else if (rc == QZ_DATA_ERROR) {
-      dout(1) << "QAT compressor DATA ERROR" << dendl;
-      return -1;
-    } else if (rc == QZ_BUF_ERROR) {
-      dout(1) << "QAT compressor BUF ERROR" << dendl;
-      return -1;
-    } else if (rc != QZ_OK) {
-      dout(1) << "QAT compressor NOT OK" << dendl;
-      return -1;
+  bufferptr ptr;
+  do {
+    while (out_len <= len * expansion_ratio[ratio_idx]) {
+      out_len *= 2;
     }
+
+    ptr = buffer::create_small_page_aligned(out_len);
+    rc = qzDecompress(session.get(), (const unsigned char*)c_in, &len, (unsigned char*)ptr.c_str(), &out_len);
+    ratio_idx++;
+  } while (rc == QZ_BUF_ERROR && ratio_idx < std::size(expansion_ratio));
+
+  if (rc == QZ_OK) {
+    dst.append(ptr, 0, out_len);
+  } else if (rc == QZ_DATA_ERROR) {
+    dout(1) << "QAT compressor DATA ERROR" << dendl;
+    return -1;
+  } else if (rc == QZ_BUF_ERROR) {
+    dout(1) << "QAT compressor BUF ERROR" << dendl;
+    return -1;
+  } else if (rc != QZ_OK) {
+    dout(1) << "QAT compressor NOT OK" << dendl;
+    return -1;
   }
 
   return 0;
