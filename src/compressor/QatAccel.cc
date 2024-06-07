@@ -42,6 +42,14 @@ void QzSessionDeleter::operator() (struct QzSession_S *session) {
   delete session;
 }
 
+QzDataFormat_T data_format(const std::string format) {
+  if ( format == "QZ_DEFLATE_GZIP_EXT") return QZ_DEFLATE_GZIP_EXT;
+  if ( format == "QZ_DEFLATE_RAW") return QZ_DEFLATE_RAW;
+
+  dout(1) << format << " don't support, switch to data fmt QZ_DEFLATE_GZIP_EXT" << dendl;
+  return QZ_DEFLATE_GZIP_EXT;
+}
+
 static bool setup_session(const std::string &alg, QatAccel::session_ptr &session) {
   int rc;
   rc = qzInit(session.get(), QZ_SW_BACKUP_DEFAULT);
@@ -52,7 +60,7 @@ static bool setup_session(const std::string &alg, QatAccel::session_ptr &session
     rc = qzGetDefaultsDeflate(&params);
     if (rc != QZ_OK)
       return false;
-    params.data_fmt = QZ_DEFLATE_GZIP_EXT;
+    params.data_fmt = data_format(g_ceph_context->_conf.get_val<std::string>("qat_compressor_data_fmt"));
     params.common_params.comp_algorithm = QZ_DEFLATE;
     params.common_params.comp_lvl = g_ceph_context->_conf->compressor_zlib_level;
     params.common_params.direction = QZ_DIR_BOTH;

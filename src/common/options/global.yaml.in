@@ -767,6 +767,12 @@ options:
   level: advanced
   desc: Set the maximum number of session within Qatzip when using QAT compressor
   default: 256
+- name: qat_compressor_data_fmt
+  type: str
+  level: advanced
+  desc: Set GZIP data format within Qatzip when using QAT compressor
+  long_desc: QZ_DEFLATE_GZIP_EXT data format is in DEFLATE wrapped by Intel QAT Gzip extension header and footer; QZ_DEFALTE_RAW data format is in raw DEFALTE without any additional header(This data format only support compression, decompression will fallback to software).
+  default: QZ_DEFLATE_GZIP_EXT
 - name: plugin_crypto_accelerator
   type: str
   level: advanced
