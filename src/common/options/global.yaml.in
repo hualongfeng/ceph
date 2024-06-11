@@ -773,6 +773,11 @@ options:
   desc: Set GZIP data format within Qatzip when using QAT compressor
   long_desc: QZ_DEFLATE_GZIP_EXT data format is in DEFLATE wrapped by Intel QAT Gzip extension header and footer; QZ_DEFALTE_RAW data format is in raw DEFALTE without any additional header(This data format only support compression, decompression will fallback to software).
   default: QZ_DEFLATE_GZIP_EXT
+- name: qat_compressor_busy_polling
+  type: bool
+  level: advanced
+  desc: Set QAT busy bolling to reduce latency at the cost of potentially increasing CPU usage
+  default: false
 - name: plugin_crypto_accelerator
   type: str
   level: advanced

@@ -51,6 +51,10 @@ QzDataFormat_T data_format(const std::string format) {
   return QZ_DEFLATE_GZIP_EXT;
 }
 
+QzPollingMode_T busy_polling(bool isSet) {
+  return isSet ? QZ_BUSY_POLLING : QZ_PERIODICAL_POLLING;
+}
+
 static bool setup_session(const std::string &alg, QatAccel::session_ptr &session) {
   int rc;
   rc = qzInit(session.get(), QZ_SW_BACKUP_DEFAULT);
@@ -65,6 +69,7 @@ static bool setup_session(const std::string &alg, QatAccel::session_ptr &session
     params.common_params.comp_algorithm = QZ_DEFLATE;
     params.common_params.comp_lvl = g_ceph_context->_conf->compressor_zlib_level;
     params.common_params.direction = QZ_DIR_BOTH;
+    params.common_params.polling_mode = busy_polling(g_ceph_context->_conf.get_val<bool>("qat_compressor_busy_polling"));
     rc = qzSetupSessionDeflate(session.get(), &params);
     if (rc != QZ_OK)
       return false;
