@@ -46,6 +46,7 @@ _prefix(std::ostream* _dout)
 
 // default window size for Zlib 1.2.8, negated for raw deflate
 #define ZLIB_DEFAULT_WIN_SIZE -15
+#define GZIP_WRAPPER 16
 
 // desired memory usage level. increasing to 9 doesn't speed things up
 // significantly (helps only on >=16K blocks) and sometimes degrades
@@ -188,7 +189,7 @@ int ZlibCompressor::decompress(bufferlist::const_iterator &p, size_t compressed_
 {
 #ifdef HAVE_QATZIP
   // QAT can only decompress with the default window size
-  if (qat_enabled && (!compressor_message || *compressor_message == ZLIB_DEFAULT_WIN_SIZE))
+  if (qat_enabled && (!compressor_message && (*compressor_message == GZIP_WRAPPER - ZLIB_DEFAULT_WIN_SIZE || *compressor_message == ZLIB_DEFAULT_WIN_SIZE)))
     return qat_accel.decompress(p, compressed_size, out, compressor_message);
 #endif
 

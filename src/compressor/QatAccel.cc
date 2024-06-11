@@ -33,6 +33,7 @@ static std::ostream& _prefix(std::ostream* _dout)
 // -----------------------------------------------------------------------------
 // default window size for Zlib 1.2.8, negated for raw deflate
 #define ZLIB_DEFAULT_WIN_SIZE -15
+#define GZIP_WRAPPER 16
 
 /* Estimate data expansion after decompression */
 static const unsigned int expansion_ratio[] = {2, 5, 20, 50, 100, 200, 1000, 10000};
@@ -153,7 +154,11 @@ int QatAccel::compress(const bufferlist &in, bufferlist &out, std::optional<int3
     return -1; // session initialization failed
   }
   auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
-  compressor_message = ZLIB_DEFAULT_WIN_SIZE;
+  if ("QZ_DEFLATE_GZIP_EXT" == g_ceph_context->_conf.get_val<std::string>("qat_compressor_data_fmt")) {
+    compressor_message = GZIP_WRAPPER - ZLIB_DEFAULT_WIN_SIZE;
+  } else {
+    compressor_message = ZLIB_DEFAULT_WIN_SIZE;
+  }
   int begin = 1;
   for (auto &i : in.buffers()) {
     const unsigned char* c_in = (unsigned char*) i.c_str();
