@@ -19,6 +19,7 @@
 #include "common/dout.h"
 #include "common/errno.h"
 #include "QatAccel.h"
+#include "zlib.h"
 
 // -----------------------------------------------------------------------------
 #define dout_context g_ceph_context
@@ -44,8 +45,8 @@ void QzSessionDeleter::operator() (struct QzSession_S *session) {
 }
 
 QzDataFormat_T data_format(const std::string format) {
-  if ( format == "QZ_DEFLATE_GZIP_EXT") return QZ_DEFLATE_GZIP_EXT;
-  if ( format == "QZ_DEFLATE_RAW") return QZ_DEFLATE_RAW;
+  if ( format.compare("QZ_DEFLATE_GZIP_EXT") == 0 ) return QZ_DEFLATE_GZIP_EXT;
+  if ( format.compare("QZ_DEFLATE_RAW") == 0) return QZ_DEFLATE_RAW;
 
   dout(1) << format << " don't support, switch to data fmt QZ_DEFLATE_GZIP_EXT" << dendl;
   return QZ_DEFLATE_GZIP_EXT;
@@ -159,10 +160,11 @@ int QatAccel::compress(const bufferlist &in, bufferlist &out, std::optional<int3
     return -1; // session initialization failed
   }
   auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
-  if ("QZ_DEFLATE_GZIP_EXT" == g_ceph_context->_conf.get_val<std::string>("qat_compressor_data_fmt")) {
-    compressor_message = GZIP_WRAPPER - ZLIB_DEFAULT_WIN_SIZE;
+  if ( 0 == g_ceph_context->_conf.get_val<std::string>("qat_compressor_data_fmt").compare("QZ_DEFLATE_GZIP_EXT")) {
+    //compressor_message = GZIP_WRAPPER - ZLIB_DEFAULT_WIN_SIZE;
+    compressor_message = GZIP_WRAPPER + MAX_WBITS;
   } else {
-    compressor_message = ZLIB_DEFAULT_WIN_SIZE;
+    compressor_message = -MAX_WBITS;
   }
   int begin = 1;
   for (auto &i : in.buffers()) {
@@ -204,13 +206,14 @@ int QatAccel::decompress(bufferlist::const_iterator &p,
   auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
   int begin = 1;
 
+  dout(1) << "QAT compressor" << dendl;
   int rc = 0;
   bufferlist tmp;
   unsigned int ratio_idx = 0;
   const char* c_in = nullptr;
   p.copy_all(tmp);
   c_in = tmp.c_str();
-  unsigned int len = tmp.length();
+  unsigned int len = std::min<unsigned int>(tmp.length(), compressed_len);
 
   len -= begin;
   c_in += begin;

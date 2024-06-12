@@ -188,8 +188,8 @@ int ZlibCompressor::compress(const bufferlist &in, bufferlist &out, std::optiona
 int ZlibCompressor::decompress(bufferlist::const_iterator &p, size_t compressed_size, bufferlist &out, std::optional<int32_t> compressor_message)
 {
 #ifdef HAVE_QATZIP
-  // QAT can only decompress with the default window size
-  if (qat_enabled && (!compressor_message && (*compressor_message == GZIP_WRAPPER - ZLIB_DEFAULT_WIN_SIZE || *compressor_message == ZLIB_DEFAULT_WIN_SIZE)))
+  // QAT can only decompress with the default window size or exist header
+  if (qat_enabled && (!compressor_message || (*compressor_message > 0 || *compressor_message == ZLIB_DEFAULT_WIN_SIZE)))
     return qat_accel.decompress(p, compressed_size, out, compressor_message);
 #endif
 
@@ -198,6 +198,7 @@ int ZlibCompressor::decompress(bufferlist::const_iterator &p, size_t compressed_
   z_stream strm;
   const char* c_in;
   int begin = 1;
+  bool mutilstream = false;
 
   /* allocate inflate state */
   strm.zalloc = Z_NULL;
@@ -209,6 +210,7 @@ int ZlibCompressor::decompress(bufferlist::const_iterator &p, size_t compressed_
   // choose the variation of compressor
   if (!compressor_message)
     compressor_message = ZLIB_DEFAULT_WIN_SIZE;
+
   ret = inflateInit2(&strm, *compressor_message);
   if (ret != Z_OK) {
     dout(1) << "Decompression init error: init return "
@@ -238,7 +240,9 @@ int ZlibCompressor::decompress(bufferlist::const_iterator &p, size_t compressed_
       }
       have = MAX_LEN - strm.avail_out;
       out.append(ptr, 0, have);
-    } while (strm.avail_out == 0);
+      mutilstream = (strm.avail_in != 0 && ret == Z_STREAM_END);
+      if (mutilstream) inflateReset(&strm);
+    } while (strm.avail_out == 0 || mutilstream);
   }
 
   /* clean up and return */
