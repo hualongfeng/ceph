@@ -66,6 +66,7 @@ static bool setup_session(const std::string &alg, QatAccel::session_ptr &session
     rc = qzGetDefaultsDeflate(&params);
     if (rc != QZ_OK)
       return false;
+
     params.data_fmt = data_format(g_ceph_context->_conf.get_val<std::string>("qat_compressor_data_fmt"));
     params.common_params.comp_algorithm = QZ_DEFLATE;
     params.common_params.comp_lvl = g_ceph_context->_conf->compressor_zlib_level;
@@ -151,6 +152,17 @@ bool QatAccel::init(const std::string &alg) {
   }
 
   alg_name = alg;
+
+  dout(15) << "QAT Compressor Data format: " <<
+               g_ceph_context->_conf.get_val<std::string>("qat_compressor_data_fmt")
+	  << dendl;
+  if ( 0 == g_ceph_context->_conf.get_val<std::string>("qat_compressor_data_fmt").compare("QZ_DEFLATE_GZIP_EXT")) {
+    windowBits = GZIP_WRAPPER + MAX_WBITS;
+  } else {
+    windowBits = -MAX_WBITS;
+  }
+  dout(15) << "WindowBits: "<< windowBits << dendl;
+
   return true;
 }
 
@@ -160,12 +172,8 @@ int QatAccel::compress(const bufferlist &in, bufferlist &out, std::optional<int3
     return -1; // session initialization failed
   }
   auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
-  if ( 0 == g_ceph_context->_conf.get_val<std::string>("qat_compressor_data_fmt").compare("QZ_DEFLATE_GZIP_EXT")) {
-    //compressor_message = GZIP_WRAPPER - ZLIB_DEFAULT_WIN_SIZE;
-    compressor_message = GZIP_WRAPPER + MAX_WBITS;
-  } else {
-    compressor_message = -MAX_WBITS;
-  }
+  compressor_message = windowBits;
+
   int begin = 1;
   for (auto &i : in.buffers()) {
     const unsigned char* c_in = (unsigned char*) i.c_str();

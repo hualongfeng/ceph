@@ -188,8 +188,8 @@ int ZlibCompressor::compress(const bufferlist &in, bufferlist &out, std::optiona
 int ZlibCompressor::decompress(bufferlist::const_iterator &p, size_t compressed_size, bufferlist &out, std::optional<int32_t> compressor_message)
 {
 #ifdef HAVE_QATZIP
-  // QAT can only decompress with the default window size or exist header
-  if (qat_enabled && (!compressor_message || (*compressor_message > 0 || *compressor_message == ZLIB_DEFAULT_WIN_SIZE)))
+  // QAT can only decompress with existing header
+  if (qat_enabled && (!compressor_message || *compressor_message == GZIP_WRAPPER + MAX_WBITS ))
     return qat_accel.decompress(p, compressed_size, out, compressor_message);
 #endif
 
@@ -207,6 +207,7 @@ int ZlibCompressor::decompress(bufferlist::const_iterator &p, size_t compressed_
   strm.avail_in = 0;
   strm.next_in = Z_NULL;
 
+  dout(10) << "Decompression windowsbit size:" << *compressor_message << dendl;
   // choose the variation of compressor
   if (!compressor_message)
     compressor_message = ZLIB_DEFAULT_WIN_SIZE;
@@ -240,6 +241,7 @@ int ZlibCompressor::decompress(bufferlist::const_iterator &p, size_t compressed_
       }
       have = MAX_LEN - strm.avail_out;
       out.append(ptr, 0, have);
+      // There may be mutil stream to decompress
       mutilstream = (strm.avail_in != 0 && ret == Z_STREAM_END);
       if (mutilstream) inflateReset(&strm);
     } while (strm.avail_out == 0 || mutilstream);
