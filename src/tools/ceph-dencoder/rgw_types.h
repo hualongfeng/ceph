@@ -138,4 +138,7 @@ TYPE(rgw_data_sync_status)
 #include "rgw_bucket_encryption.h"
 TYPE(RGWBucketEncryptionConfig)
 
+#include "rgw_compression_types.h"
+TYPE(RGWCompressionInfo)
+
 #endif

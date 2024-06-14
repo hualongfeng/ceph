@@ -234,3 +234,12 @@ void RGWCompressionInfo::dump(Formatter *f) const
   ::encode_json("blocks", blocks, f);
 }
 
+void RGWCompressionInfo::generate_test_instances(list<RGWCompressionInfo*>& o)
+{
+  RGWCompressionInfo *info = new RGWCompressionInfo;
+  info->compression_type = "zlib";
+  info->orig_size = 1000;
+  info->compressor_message = -15;
+  o.push_back(info);
+  o.push_back(new RGWCompressionInfo);
+}
