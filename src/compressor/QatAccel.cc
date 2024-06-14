@@ -161,7 +161,6 @@ bool QatAccel::init(const std::string &alg) {
   } else {
     windowBits = -MAX_WBITS;
   }
-  dout(15) << "WindowBits: "<< windowBits << dendl;
 
   return true;
 }
@@ -214,7 +213,6 @@ int QatAccel::decompress(bufferlist::const_iterator &p,
   auto session = cached_session_t{this, std::move(s)}; // returns to the session pool on destruction
   int begin = 1;
 
-  dout(1) << "QAT compressor" << dendl;
   int rc = 0;
   bufferlist tmp;
   unsigned int ratio_idx = 0;

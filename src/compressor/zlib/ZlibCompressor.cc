@@ -207,7 +207,6 @@ int ZlibCompressor::decompress(bufferlist::const_iterator &p, size_t compressed_
   strm.avail_in = 0;
   strm.next_in = Z_NULL;
 
-  dout(10) << "Decompression windowsbit size:" << *compressor_message << dendl;
   // choose the variation of compressor
   if (!compressor_message)
     compressor_message = ZLIB_DEFAULT_WIN_SIZE;
